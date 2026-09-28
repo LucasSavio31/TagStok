@@ -5,7 +5,7 @@ Zebra MC3300R / MC3390R, com etiquetas **RFID UHF EPC Gen2** no padrão **GS1**.
 
 | Parte | Arquivo | Detalhe |
 |---|---|---|
-| Servidor + tela do PC | `downloads/TagStock-Servidor.exe` | porta **8100**, banco em `AppData\Local\TagStock	agstock.db` |
+| Servidor + tela do PC | `downloads/TagStock-Servidor.exe` | porta **8100**, banco em `AppData\Local\TagStock\tagstock.db` |
 | App do coletor | `downloads/TagStock.apk` | pacote `br.curso.tagstock`, perfil DataWedge `TAGSTOCK` |
 
 ## Como o iTAG funciona (e o que foi reproduzido)
