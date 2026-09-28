@@ -1,6 +1,6 @@
 """Inicia o servidor TagStock e abre a tela no navegador (vira o TagStock-Servidor.exe).
 
-Porta 8100: pode rodar junto com o Mini WMS (porta 8000) no mesmo PC.
+Porta 8100 (outra porta: set TAGSTOCK_PORTA=8200 antes de abrir).
 """
 import os
 import socket

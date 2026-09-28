@@ -1,15 +1,12 @@
 # TagStock RFID — controle de estoque por etiqueta RFID (no estilo iTAG)
 
-Sistema separado do **Mini WMS** (não altera nada dele). Os dois podem rodar juntos:
+Sistema completo e independente: **servidor no PC** (Windows), **tela no navegador** e **app do coletor**
+Zebra MC3300R / MC3390R, com etiquetas **RFID UHF EPC Gen2** no padrão **GS1**.
 
-| | Mini WMS (didático) | TagStock (este) |
+| Parte | Arquivo | Detalhe |
 |---|---|---|
-| Servidor no PC | `WMS-Servidor.exe`, porta **8000** | `TagStock-Servidor.exe`, porta **8100** |
-| App do coletor | `ColetorWMS.apk` (`br.curso.wms`) | `TagStock.apk` (`br.curso.tagstock`) |
-| Perfil DataWedge | `WMS` | `TAGSTOCK` |
-| Banco | `AppData\Local\MiniWMS\estoque.db` | `AppData\Local\TagStock\tagstock.db` |
-
-No coletor, os dois apps aparecem lado a lado no **AppCenter**.
+| Servidor + tela do PC | `downloads/TagStock-Servidor.exe` | porta **8100**, banco em `AppData\Local\TagStock	agstock.db` |
+| App do coletor | `downloads/TagStock.apk` | pacote `br.curso.tagstock`, perfil DataWedge `TAGSTOCK` |
 
 ## Como o iTAG funciona (e o que foi reproduzido)
 
@@ -77,7 +74,7 @@ ou, no coletor: 5 toques + PIN 1234 → marcar **TagStock**.
 ```
 cd server
 pip install -r requirements-dev.txt
-pytest                      (12 testes: EPC, OF, kit, gravação, vincular/baixa/estorno, inventário, expedição, antifurto...)
+pytest                      (13 testes: EPC, OF, kit, gravação, vincular/baixa/estorno, inventário, expedição, antifurto...)
 python tagstock_servidor.py
 ```
 APK: `cd coletor && gradlew assembleDebug` (JDK 17, Android SDK 34, `app/libs/API3_LIB-release.aar` do Zebra RFID SDK).
@@ -91,5 +88,5 @@ O `.github/workflows/build.yml` gera o `.exe` e o `.apk` sozinho no GitHub.
 | `server/app/main.py` | API e login |
 | `server/app/static/index.html`, `pc-*.js` | Tela do PC |
 | `server/app/static/m.html` | Tela do coletor (também vai dentro do APK para o modo sem servidor) |
-| `coletor/app/.../Rfid.kt` | Leitor Zebra (o mesmo código já testado no Coletor WMS) |
-| `coletor/app/.../MainActivity.kt` | WebView, ponte `ColetorApp`, DataWedge `TAGSTOCK`, bipe nativo, arquivo da contagem |
+| `coletor/app/.../Rfid.kt` | Leitor RFID Zebra (SDK API3): conectar, gatilho, potência, leitura, gravação, localizar |
+| `coletor/app/.../MainActivity.kt` | WebView, ponte `ColetorApp`, DataWedge `TAGSTOCK`, bipe nativo, arquivo da contagem, botão de desligar |

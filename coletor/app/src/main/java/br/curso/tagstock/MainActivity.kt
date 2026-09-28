@@ -38,7 +38,7 @@ import kotlin.concurrent.thread
 /**
  * App TagStock do coletor = "casca" da tela web do servidor TagStock (http://PC:8100/m).
  *
- *  - É um app separado do Coletor WMS (pacote br.curso.tagstock): os dois convivem no coletor.
+ *  - Pacote próprio (br.curso.tagstock): convive com qualquer outro app no coletor.
  *
  *  - As telas são as da web: melhorou no servidor, o coletor vê na hora.
  *  - Código de barras: o DataWedge "digita" o código na página (perfil do app).

@@ -8,7 +8,7 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        // Pacote próprio: instala ao lado do Coletor WMS (br.curso.wms) sem substituir
+        // Pacote próprio do TagStock
         applicationId = "br.curso.tagstock"
         minSdk = 26          // MC3300R/MC3390R: Android 8.1 ou superior
         targetSdk = 34
