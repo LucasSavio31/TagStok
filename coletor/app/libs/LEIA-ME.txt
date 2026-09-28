@@ -1,0 +1,1 @@
+Coloque aqui o API3_LIB-release.aar (Zebra RFID SDK for Android). O build automático baixa sozinho.

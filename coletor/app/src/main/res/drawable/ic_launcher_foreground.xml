@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ícone: etiqueta RFID (tag com furo e antena em espiral) com ondas de rádio.
+     Área 108x108; o que sempre aparece é o círculo central de 66. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#FFFFFF" android:pathData="M34,38 L60,38 L74,54 L60,70 L34,70 Q31,70 31,67 L31,41 Q31,38 34,38 Z" />
+    <path android:fillColor="#0B7A75" android:pathData="M63,54 m-3.5,0 a3.5,3.5 0 1,0 7,0 a3.5,3.5 0 1,0 -7,0" />
+    <path android:strokeColor="#0B7A75" android:strokeWidth="2.4" android:fillColor="#00000000"
+        android:pathData="M37,44 L53,44 L53,64 L39,64 L39,48 L49,48 L49,60 L43,60 L43,52 L46,52" />
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="2.6" android:fillColor="#00000000" android:strokeLineCap="round"
+        android:pathData="M78,44 Q84,54 78,64 M83,39 Q92,54 83,69" />
+</vector>

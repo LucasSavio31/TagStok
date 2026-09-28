@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>TagStock RFID</title>
+<link rel="icon" href="/static/icone.svg">
+<style>
+  :root {
+    --bg: #f1f4f8; --painel: #fff; --borda: #dde3ea; --texto: #16202c; --texto-2: #5d6b7c; --lateral: #0f2236; --lateral-2: #17324d;
+    --primaria: #0b7a75; --primaria-2: #09625e; --perigo: #c62828; --sucesso: #2e7d32; --alerta: #b26a00; --info: #1f6feb;
+    --f-perigo: #fdecea; --f-sucesso: #e8f5e9; --f-alerta: #fff4e0; --f-info: #e6f4f3; --sombra: 0 1px 3px #0000001a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0e141c; --painel: #16202c; --borda: #283546; --texto: #e5ebf2; --texto-2: #98a6b8; --lateral: #0a1520; --lateral-2: #13283d;
+            --primaria: #26a69a; --primaria-2: #1e8e84; --perigo: #ef5350; --sucesso: #66bb6a; --alerta: #ffb74d; --info: #5b9dff;
+            --f-perigo: #3a1d1f; --f-sucesso: #1b3320; --f-alerta: #3a2c14; --f-info: #123433; --sombra: none; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--texto); font: 14px/1.4 "Segoe UI", system-ui, Roboto, Arial, sans-serif; display: flex; }
+  a { color: var(--primaria); }
+  nav { width: 232px; flex: none; background: var(--lateral); color: #cfe0ee; display: flex; flex-direction: column; overflow-y: auto; }
+  nav .marca { display: flex; align-items: center; gap: 10px; padding: 16px 16px 12px; color: #fff; font-weight: 700; font-size: 18px; letter-spacing: .3px; }
+  nav .marca small { display: block; font-size: 11px; font-weight: 400; color: #8fb3cf; letter-spacing: 0; }
+  nav .grupo { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #7e9bb4; padding: 14px 16px 4px; }
+  nav a { display: flex; align-items: center; gap: 10px; color: #d8e6f2; text-decoration: none; padding: 7px 16px; border-left: 3px solid transparent; cursor: pointer; }
+  nav a:hover { background: var(--lateral-2); }
+  nav a.ativo { background: var(--lateral-2); border-left-color: #4dd0c4; color: #fff; font-weight: 600; }
+  nav a .ic { width: 20px; text-align: center; }
+  nav a .badge { margin-left: auto; background: #e53935; color: #fff; border-radius: 9px; font-size: 11px; padding: 0 6px; }
+  nav a .badge:empty { display: none; }
+  nav .rodape { margin-top: auto; padding: 12px 16px; font-size: 12px; color: #8fb3cf; border-top: 1px solid #ffffff14; }
+  .corpo { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  header { background: var(--painel); border-bottom: 1px solid var(--borda); display: flex; align-items: center; gap: 12px; padding: 0 20px; min-height: 54px; flex: none; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  .leitor { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--texto-2); }
+  .ponto { width: 10px; height: 10px; border-radius: 50%; background: #9aa5b1; display: inline-block; }
+  .ponto.on { background: #2e7d32; box-shadow: 0 0 0 3px #2e7d3233; }
+  .ponto.lendo { background: #1f6feb; animation: pulsa .7s infinite alternate; }
+  @keyframes pulsa { to { opacity: .4; } }
+  main { flex: 1; overflow-y: auto; padding: 18px 20px 40px; }
+  .card { background: var(--painel); border: 1px solid var(--borda); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; box-shadow: var(--sombra); }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--texto-2); margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+  .card h2 .dir { margin-left: auto; text-transform: none; letter-spacing: 0; display: flex; gap: 6px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .kpi { background: var(--painel); border: 1px solid var(--borda); border-radius: 10px; padding: 12px 14px; box-shadow: var(--sombra); }
+  .kpi .rot { font-size: 12px; color: var(--texto-2); }
+  .kpi .val { font-size: 26px; font-weight: 700; margin-top: 2px; }
+  .kpi.clic { cursor: pointer; } .kpi.clic:hover { border-color: var(--primaria); }
+  .grade2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 1100px) { .grade2 { grid-template-columns: 1fr; } }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--borda); vertical-align: middle; }
+  th { font-size: 12px; color: var(--texto-2); font-weight: 600; background: var(--bg); position: sticky; top: 0; z-index: 1; }
+  tr.clic { cursor: pointer; } tr.clic:hover td { background: var(--f-info); }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  .mono { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12.5px; }
+  .fraco { color: var(--texto-2); font-size: 12.5px; }
+  .tabela { max-height: 62vh; overflow: auto; border: 1px solid var(--borda); border-radius: 8px; }
+  .tabela table th:first-child, .tabela table td:first-child { padding-left: 12px; }
+  .vazio { text-align: center; color: var(--texto-2); padding: 22px; }
+  .filtros { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; margin-bottom: 12px; }
+  .filtros label, .form label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--texto-2); font-weight: 600; }
+  input, select, textarea { font: 14px "Segoe UI", system-ui, Arial, sans-serif; padding: 7px 9px; border: 1px solid var(--borda); border-radius: 7px; background: var(--painel); color: var(--texto); }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--primaria); outline-offset: -1px; }
+  textarea { font-family: Consolas, monospace; font-size: 12.5px; }
+  .form { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px 12px; }
+  .form .largo { grid-column: 1 / -1; }
+  .check { flex-direction: row !important; align-items: center; gap: 6px !important; font-weight: 400 !important; color: var(--texto) !important; font-size: 14px !important; }
+  button { font: 600 13.5px "Segoe UI", system-ui, Arial, sans-serif; padding: 7px 13px; border-radius: 7px; border: 1px solid var(--borda); background: var(--painel); color: var(--texto); cursor: pointer; white-space: nowrap; }
+  button:hover { filter: brightness(.96); } button:disabled { opacity: .45; cursor: default; }
+  button.p { background: var(--primaria); border-color: var(--primaria); color: #fff; }
+  button.perigo { background: var(--perigo); border-color: var(--perigo); color: #fff; }
+  button.suc { background: var(--sucesso); border-color: var(--sucesso); color: #fff; }
+  button.link { border: none; background: none; color: var(--primaria); padding: 2px 4px; }
+  button.peq { padding: 3px 8px; font-size: 12px; }
+  .botoes { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .selo { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11.5px; font-weight: 700; background: var(--bg); color: var(--texto-2); white-space: nowrap; }
+  .selo.ESTOQUE, .selo.OK, .selo.FINALIZADA, .selo.FINALIZADO, .selo.ok { background: var(--f-sucesso); color: var(--sucesso); }
+  .selo.EMITIDA, .selo.ABERTA, .selo.ABERTO, .selo.SOBRA, .selo.OUTRO_LOCAL { background: var(--f-info); color: var(--primaria); }
+  .selo.BAIXADA, .selo.FALTA, .selo.CANCELADA, .selo.CANCELADO, .selo.erro { background: var(--f-perigo); color: var(--perigo); }
+  .selo.DESCONHECIDA, .selo.alerta { background: var(--f-alerta); color: var(--alerta); }
+  .progresso { height: 8px; border-radius: 4px; background: var(--bg); overflow: hidden; min-width: 80px; }
+  .progresso > span { display: block; height: 100%; background: var(--primaria); }
+  .progresso.cheio > span { background: var(--sucesso); } .progresso.passou > span { background: var(--alerta); }
+  .barras .linha { display: grid; grid-template-columns: 140px 1fr 60px; gap: 8px; align-items: center; margin: 5px 0; font-size: 13px; }
+  .barras .linha .b { height: 16px; background: var(--primaria); border-radius: 3px; min-width: 2px; }
+  .colunas { display: flex; align-items: flex-end; gap: 6px; height: 170px; padding-top: 8px; }
+  .colunas .dia { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; height: 100%; justify-content: flex-end; font-size: 11px; color: var(--texto-2); }
+  .colunas .par { display: flex; gap: 2px; align-items: flex-end; height: 130px; }
+  .colunas .e { width: 9px; background: var(--primaria); border-radius: 2px 2px 0 0; }
+  .colunas .s { width: 9px; background: #e57373; border-radius: 2px 2px 0 0; }
+  .legenda { display: flex; gap: 14px; font-size: 12px; color: var(--texto-2); } .legenda i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
+  dialog { border: none; border-radius: 12px; padding: 0; background: var(--painel); color: var(--texto); box-shadow: 0 20px 60px #0008; width: min(760px, 94vw); max-height: 90vh; }
+  dialog.largo { width: min(1100px, 96vw); }
+  dialog::backdrop { background: #0009; }
+  dialog .cab { display: flex; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--borda); position: sticky; top: 0; background: var(--painel); z-index: 2; }
+  dialog .cab h3 { margin: 0; font-size: 17px; flex: 1; }
+  dialog .conteudo { padding: 16px 18px; overflow-y: auto; max-height: calc(90vh - 120px); }
+  dialog .pe { padding: 12px 18px; border-top: 1px solid var(--borda); display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+  #avisos { position: fixed; right: 18px; bottom: 18px; display: flex; flex-direction: column; gap: 8px; z-index: 100; max-width: 420px; }
+  .aviso { padding: 11px 14px; border-radius: 9px; color: #fff; box-shadow: 0 8px 24px #0005; font-weight: 600; white-space: pre-line; }
+  .aviso.ok { background: #2e7d32; } .aviso.erro { background: #c62828; } .aviso.info { background: #0b7a75; }
+  .login { position: fixed; inset: 0; background: linear-gradient(135deg, #0f2236, #0b7a75); display: grid; place-items: center; z-index: 200; }
+  .login form { background: var(--painel); padding: 28px; border-radius: 14px; width: 340px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 20px 60px #0006; }
+  .login h2 { margin: 0; display: flex; align-items: center; gap: 10px; }
+  .login label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--texto-2); font-weight: 600; }
+  .login .erro { color: var(--perigo); font-weight: 600; min-height: 18px; }
+  .abas { display: flex; gap: 4px; border-bottom: 1px solid var(--borda); margin-bottom: 12px; flex-wrap: wrap; }
+  .abas button { border: none; border-bottom: 3px solid transparent; border-radius: 0; background: none; color: var(--texto-2); padding: 8px 12px; }
+  .abas button.ativo { color: var(--primaria); border-bottom-color: var(--primaria); }
+  .dica { background: var(--f-info); border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-bottom: 12px; }
+  .captura { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+  .captura input { flex: 1; font-family: Consolas, monospace; }
+  .oculto { display: none !important; }
+  .lista-acoes { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+  .acao { border: 1px solid var(--borda); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .acao h4 { margin: 0; font-size: 14px; }
+  .acao label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--texto-2); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="login oculto" id="telaLogin">
+  <form id="formLogin">
+    <h2><img src="/static/icone.svg" width="34" height="34" alt=""> TagStock</h2>
+    <div class="fraco">Controle de estoque por RFID</div>
+    <label>Usuário<input name="login" autocomplete="username" required></label>
+    <label>Senha<input name="senha" type="password" autocomplete="current-password" required></label>
+    <div class="erro" id="erroLogin"></div>
+    <button class="p" type="submit">Entrar</button>
+    <div class="fraco">Primeiro acesso: usuário <b>admin</b>, senha <b>admin</b> (troque depois em Usuários).</div>
+  </form>
+</div>
+
+<nav>
+  <div class="marca"><img src="/static/icone.svg" width="30" height="30" alt=""><div>TagStock<small>RFID · controle de estoque</small></div></div>
+  <div class="grupo">Visão geral</div>
+  <a data-p="painel"><span class="ic">📊</span>Análise</a>
+  <a data-p="estoque"><span class="ic">📦</span>Estoque</a>
+  <a data-p="etiquetas"><span class="ic">🏷️</span>Etiquetas / rastreio</a>
+  <div class="grupo">Operação</div>
+  <a data-p="ordens"><span class="ic">🖨️</span>OF · Emissão</a>
+  <a data-p="estacao"><span class="ic">📡</span>Estação RFID</a>
+  <a data-p="pedidos"><span class="ic">🚚</span>Expedição</a>
+  <a data-p="inventarios"><span class="ic">📋</span>Inventário</a>
+  <a data-p="antifurto"><span class="ic">🛡️</span>Antifurto</a>
+  <a data-p="movimentos"><span class="ic">🧾</span>Movimentações</a>
+  <a data-p="alertas"><span class="ic">🚨</span>Alertas<span class="badge" id="badgeAlertas"></span></a>
+  <a data-p="monitor"><span class="ic">🖥️</span>Monitor</a>
+  <div class="grupo">Cadastros</div>
+  <a data-p="produtos"><span class="ic">👕</span>Produtos</a>
+  <a data-p="locais"><span class="ic">🏬</span>Locais</a>
+  <a data-p="impressoras"><span class="ic">🖨</span>Impressoras</a>
+  <a data-p="usuarios" class="so-admin"><span class="ic">👤</span>Usuários</a>
+  <a data-p="config"><span class="ic">⚙️</span>Configurações</a>
+  <div class="rodape"><div id="quem"></div><div id="enderecoColetor"></div><button class="link" id="sair" style="color:#8fd4cc;padding:4px 0">Sair</button></div>
+</nav>
+
+<div class="corpo">
+  <header>
+    <h1 id="titulo">TagStock</h1>
+    <div class="leitor" title="Leitor: coletor aberto na tela Estação PC">
+      <span class="ponto" id="pontoLeitor"></span><span id="textoLeitor">Coletor desconectado</span>
+      <button class="peq" id="btLer" disabled>▶ Ler</button><button class="peq" id="btParar" disabled>■ Parar</button>
+      <select id="potencia" title="Potência da antena" style="padding:3px 6px">
+        <option value="100">100%</option><option value="70">70%</option><option value="50">50%</option><option value="30">30%</option><option value="15">15%</option>
+      </select>
+    </div>
+  </header>
+  <main id="main"></main>
+</div>
+<div id="avisos"></div>
+<dialog id="dlg"><div class="cab"><h3 id="dlgTitulo"></h3><button class="link" onclick="$('#dlg').close()">✕</button></div>
+  <div class="conteudo" id="dlgConteudo"></div><div class="pe" id="dlgPe"></div></dialog>
+
+<script src="/static/pc-base.js"></script>
+<script src="/static/pc-paginas.js"></script>
+<script>iniciar();</script>
+</body>
+</html>

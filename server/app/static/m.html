@@ -1,0 +1,1227 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, interactive-widget=resizes-content">
+<meta name="theme-color" content="#0f2236">
+<meta name="color-scheme" content="light dark">
+<title>TagStock Coletor</title>
+<link rel="icon" href="/static/icone.svg">
+<!--
+  Tela do coletor TagStock (Zebra MC3300R / MC3390R), aberta dentro do app TagStock (WebView).
+  - RFID: o app lê pelo SDK Zebra e chama leituraRfid(epc) aqui.
+  - Código de barras: o DataWedge "digita" o código no campo invisível #leitura.
+  - A página fala com o app pelo objeto ColetorApp (gatilho, potência, gravar, localizar...).
+  Toda regra fica no servidor; esta tela só lê, mostra e confirma.
+-->
+<style>
+  :root {
+    --bg: #eef2f6; --painel: #fff; --borda: #d8dee6; --texto: #17202b; --texto-2: #5c6778;
+    --topo: #0f2236; --primaria: #0b7a75; --perigo: #c62828; --sucesso: #2e7d32; --alerta: #b26a00;
+    --fundo-perigo: #fdecea; --fundo-sucesso: #e8f5e9; --fundo-alerta: #fff4e0; --fundo-info: #e3f3f2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1520; --painel: #172130; --borda: #2a3748; --texto: #e4eaf2; --texto-2: #9aa8ba; --topo: #0a1520;
+            --primaria: #26a69a; --perigo: #ef5350; --sucesso: #66bb6a; --alerta: #ffb74d;
+            --fundo-perigo: #3a1d1f; --fundo-sucesso: #1b3320; --fundo-alerta: #3a2c14; --fundo-info: #123433; }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; overscroll-behavior: none; }
+  body { -webkit-user-select: none; user-select: none; background: var(--bg); color: var(--texto);
+         font: 15px/1.35 Roboto, "Segoe UI", system-ui, Arial, sans-serif; display: flex; flex-direction: column; max-width: 560px; margin: 0 auto; }
+  input, textarea { -webkit-user-select: text; user-select: text; }
+  header { background: var(--topo); color: #fff; display: flex; align-items: center; gap: 4px; padding: 0 4px 0 8px; min-height: 50px; flex: none; }
+  header h1 { font-size: 15px; line-height: 1.15; margin: 0; flex: 1; min-width: 0; font-weight: 600; }
+  header button { background: none; border: none; color: #fff; font-size: 20px; width: 38px; height: 42px; border-radius: 8px; flex: none; padding: 0; }
+  header button:active { background: #ffffff22; }
+  header #modo.barras { background: #ffb74d33; }
+  header #modo.lendo { background: var(--primaria); animation: pulsa .6s infinite alternate; }
+  header #teclado.ligado { background: var(--primaria); }
+  @keyframes pulsa { to { opacity: .55; } }
+  .captura { position: fixed; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; resize: none; overflow: hidden; }
+  main { flex: 1; overflow-y: auto; padding: 8px 8px 16px; }
+  .grade-menu { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 7px; }
+  .tile { text-decoration: none; background: var(--painel); border: 1px solid var(--borda); border-radius: 12px; min-height: 84px; display: flex; flex-direction: column; align-items: center;
+          justify-content: center; gap: 5px; font-weight: 600; font-size: 13px; color: var(--texto); padding: 6px; text-align: center; line-height: 1.15; }
+  .tile:active { background: var(--fundo-info); }
+  .tile .ic { font-size: 26px; line-height: 1; }
+  .secao { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--texto-2); margin: 12px 2px 6px; font-weight: 700; }
+  .card { background: var(--painel); border: 1px solid var(--borda); border-radius: 10px; padding: 10px; margin-bottom: 8px; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--texto-2); margin: 0 0 6px; display: flex; align-items: center; gap: 6px; }
+  .card h2 .dir { margin-left: auto; text-transform: none; letter-spacing: 0; }
+  .dica { color: var(--texto-2); text-align: center; padding: 14px 8px; border: 2px dashed var(--borda); border-radius: 10px; font-size: 14px; }
+  .dica b { color: var(--texto); }
+  .produto { font-size: 16px; font-weight: 700; }
+  .fraco { color: var(--texto-2); font-size: 13px; font-weight: 400; }
+  .mono { font-family: Consolas, monospace; font-size: 12.5px; word-break: break-all; }
+  label.campo { display: block; margin-bottom: 8px; }
+  label.campo > span { display: block; font-size: 12px; font-weight: 600; color: var(--texto-2); margin-bottom: 3px; }
+  input, select { width: 100%; font: 16px Roboto, "Segoe UI", Arial, sans-serif; padding: 9px 10px; border: 1px solid var(--borda); border-radius: 8px; background: var(--painel); color: var(--texto); min-width: 0; }
+  input:focus, select:focus { outline: 2px solid var(--primaria); outline-offset: -1px; }
+  input[type=checkbox] { width: auto; }
+  .duas { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .botoes { display: flex; gap: 8px; margin-top: 4px; }
+  .botoes > * { flex: 1; }
+  button.b { font: 700 15px Roboto, "Segoe UI", Arial, sans-serif; min-height: 50px; border-radius: 10px; border: 1px solid var(--borda); background: var(--painel); color: var(--texto); padding: 6px 10px; }
+  button.b:active { filter: brightness(.92); }
+  button.b:disabled { opacity: .45; }
+  button.primario { background: var(--primaria); border-color: var(--primaria); color: #fff; }
+  button.perigo { background: var(--perigo); border-color: var(--perigo); color: #fff; }
+  button.sucesso { background: var(--sucesso); border-color: var(--sucesso); color: #fff; }
+  button.link { background: none; border: none; color: var(--primaria); font: 600 14px inherit; padding: 4px; }
+  .lista { list-style: none; margin: 0; padding: 0; }
+  .lista li { display: flex; align-items: center; gap: 8px; padding: 8px 2px; border-bottom: 1px solid var(--borda); }
+  .lista li:last-child { border-bottom: none; }
+  .lista li .info { flex: 1; min-width: 0; }
+  .lista li .qtd { font-weight: 700; font-size: 16px; white-space: nowrap; }
+  .lista li.ok { background: var(--fundo-sucesso); }
+  .lista li.erro .info { color: var(--perigo); }
+  .lista li.clicavel:active { background: var(--fundo-info); }
+  .x { border: none; background: none; color: var(--texto-2); font-size: 20px; width: 34px; height: 34px; flex: none; }
+  .contador { font-size: 26px; font-weight: 800; }
+  .numeros { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; text-align: center; }
+  .numeros div { background: var(--bg); border-radius: 8px; padding: 6px 2px; }
+  .numeros b { display: block; font-size: 22px; }
+  .numeros span { font-size: 11.5px; color: var(--texto-2); }
+  .progresso { height: 7px; border-radius: 4px; background: var(--bg); overflow: hidden; margin-top: 4px; }
+  .progresso > span { display: block; height: 100%; background: var(--primaria); }
+  .progresso.completo > span { background: var(--sucesso); }
+  .radar { height: 46px; border-radius: 23px; background: var(--bg); border: 1px solid var(--borda); overflow: hidden; margin: 14px 0 8px; }
+  .radar-barra { height: 100%; width: 0; background: hsl(220, 85%, 50%); transition: width .15s, background .15s; }
+  .selo { display: inline-block; padding: 0 7px; border-radius: 9px; font-size: 11.5px; font-weight: 700; background: var(--bg); color: var(--texto-2); white-space: nowrap; }
+  .selo.perigo { background: var(--fundo-perigo); color: var(--perigo); } .selo.alerta { background: var(--fundo-alerta); color: var(--alerta); }
+  .selo.sucesso { background: var(--fundo-sucesso); color: var(--sucesso); } .selo.info { background: var(--fundo-info); color: var(--primaria); }
+  .vazio { color: var(--texto-2); text-align: center; padding: 10px; font-size: 14px; justify-content: center; }
+  .alarme { background: var(--perigo); color: #fff; border-radius: 10px; padding: 16px; text-align: center; font-size: 20px; font-weight: 800; animation: pisca .4s infinite alternate; }
+  @keyframes pisca { to { opacity: .6; } }
+  dialog { border: none; border-radius: 12px; padding: 16px; width: min(340px, calc(100vw - 24px)); background: var(--painel); color: var(--texto); box-shadow: 0 16px 40px #0007; }
+  dialog::backdrop { background: rgba(0,0,0,.5); }
+  dialog h3 { margin: 0 0 10px; font-size: 17px; }
+  dialog .botoes { margin-top: 12px; }
+  dialog[open] { margin: 70px auto auto; }
+  dialog.pin { background: #fff; color: #17202b; border-radius: 6px; padding: 10px 14px 2px; width: min(280px, 86vw); }
+  dialog.pin h3 { font-size: 16px; font-weight: 500; margin: 0 0 2px; }
+  dialog.pin .pin-visor { text-align: center; font-size: 20px; letter-spacing: 8px; min-height: 24px; line-height: 24px; }
+  dialog.pin .pin-teclado { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 10px; margin: 4px 4px 0; }
+  dialog.pin .pin-teclado button { height: 36px; border: 0; border-radius: 4px; background: #d6d8da; color: #17202b; font-size: 18px; box-shadow: 0 1px 2px #0003; }
+  dialog.pin .pin-teclado button.ok { background: #0b7a75; color: #fff; border-radius: 8px; }
+  dialog.pin .pin-rodape { text-align: right; }
+  dialog.pin .pin-rodape button { background: none; border: 0; color: #00897b; font-size: 14px; font-weight: 600; padding: 6px; }
+  #tecladoTela { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; background: #1b2230; padding: 4px 3px 6px; box-shadow: 0 -4px 14px #0006; touch-action: manipulation; }
+  #tecladoTela[hidden] { display: none; }
+  #tecladoTela .linha { display: flex; gap: 3px; margin-top: 3px; }
+  #tecladoTela button { flex: 1; min-width: 0; height: 44px; border: 0; border-radius: 6px; background: #3a4458; color: #fff; font: 600 18px system-ui, sans-serif; padding: 0; }
+  #tecladoTela button:active { background: #5b6b8a; }
+  #tecladoTela button.esp { background: #283144; font-size: 15px; }
+  #tecladoTela button.ok { background: var(--primaria); }
+  #tecladoTela.numerico button { height: 52px; font-size: 22px; }
+  body.com-teclado main { padding-bottom: 250px; }
+  #rodape { flex: none; text-align: center; font-size: 12px; color: var(--texto-2); padding: 4px 8px; border-top: 1px solid var(--borda); }
+  #msg { flex: none; padding: 10px 12px; font-size: 15px; font-weight: 600; white-space: pre-line; display: none; border-top: 3px solid; max-height: 35vh; overflow-y: auto; }
+  #msg.ok { display: block; background: var(--fundo-sucesso); border-color: var(--sucesso); }
+  #msg.erro { display: block; background: var(--fundo-perigo); border-color: var(--perigo); }
+  #msg.alerta { display: block; background: var(--fundo-alerta); border-color: var(--alerta); }
+  #msg.info { display: block; background: var(--fundo-info); border-color: var(--primaria); }
+  .login { padding: 24px 12px; }
+  .login .logo { text-align: center; margin: 10px 0 18px; }
+  .login .logo b { display: block; font-size: 24px; margin-top: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <button id="voltar" aria-label="Voltar" style="display:none;width:28px">←</button>
+  <h1 id="titulo">TagStock</h1>
+  <button id="modo" title="O gatilho lê RFID ou código de barras (toque para trocar)" hidden>📡</button>
+  <button id="teclado" title="Teclado">⌨</button>
+  <button id="btConfig" title="Config">⚙</button>
+</header>
+<textarea id="leitura" class="captura" rows="1" inputmode="none" autocomplete="off" autocapitalize="characters" spellcheck="false" tabindex="-1" aria-hidden="true"></textarea>
+<main id="tela"></main>
+<div id="msg" role="status"></div>
+<footer id="rodape"></footer>
+<div id="tecladoTela" hidden></div>
+
+<dialog id="dlgDigitar"><form method="dialog" id="formDigitar">
+  <h3>Digitar código</h3>
+  <input id="edDigitar" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Código de barras, SKU ou EPC">
+  <div class="botoes"><button class="b" type="button" id="digCancelar">Cancelar</button><button class="b primario" type="submit">OK</button></div>
+</form></dialog>
+
+<dialog id="dlgSenha" class="pin">
+  <h3>PIN do administrador</h3>
+  <div class="pin-visor" id="pinVisor">—</div>
+  <div class="pin-teclado" id="pinTeclado">
+    <button type="button">1</button><button type="button">2</button><button type="button">3</button>
+    <button type="button">4</button><button type="button">5</button><button type="button">6</button>
+    <button type="button">7</button><button type="button">8</button><button type="button">9</button>
+    <button type="button" data-t="apagar">⌫</button><button type="button">0</button><button type="button" data-t="ok" class="ok">OK</button>
+  </div>
+  <div class="pin-rodape"><button type="button" id="senhaCancelar">CANCELAR</button></div>
+</dialog>
+
+<dialog id="dlgConfirmar"><h3 id="cfTitulo"></h3><div id="cfTexto"></div>
+  <div class="botoes"><button class="b" id="cfNao">Cancelar</button><button class="b primario" id="cfSim">Confirmar</button></div></dialog>
+
+<script>
+"use strict";
+// ======================================================================= utilidades
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const num = (v) => Number(v ?? 0).toLocaleString("pt-BR");
+const dataBR = (d) => (d ? d.slice(8, 10) + "/" + d.slice(5, 7) + " " + d.slice(11, 16) : "-");
+const variante = (t) => [t.cor, t.tamanho].filter(Boolean).join(" / ");
+const app = (() => { try { return window.ColetorApp || null; } catch { return null; } })();
+const LOCAL = location.protocol === "file:";          // tela de dentro do APK: sem servidor
+const TELAS_LOCAIS = ["menu", "ler", "gravarLivre", "config"];
+
+const cfg = { volume: 100, potLeitura: 100, potBaixa: 60, potLocalizar: 100, potGravar: 30, potInventario: 100, teclado: false };
+try { Object.assign(cfg, JSON.parse(localStorage.getItem("tagstock.cfg") || "{}")); } catch {}
+function salvarCfg() { try { localStorage.setItem("tagstock.cfg", JSON.stringify(cfg)); } catch {} }
+let token = null, usuario = null;
+try { token = localStorage.getItem("tagstock.token"); usuario = JSON.parse(localStorage.getItem("tagstock.usuario") || "null"); } catch {}
+let idColetor = null;
+try { idColetor = app?.dispositivo?.() || localStorage.getItem("tagstock.id"); } catch {}
+if (!idColetor) { idColetor = "COL-" + Math.random().toString(36).slice(2, 8).toUpperCase(); try { localStorage.setItem("tagstock.id", idColetor); } catch {} }
+
+async function api(metodo, url, corpo) {
+  let r;
+  try {
+    r = await fetch(url, { method: metodo, headers: { "Content-Type": "application/json", "X-Token": token || "", "X-Origem": "COLETOR", "X-Dispositivo": idColetor },
+                           body: corpo ? JSON.stringify(corpo) : undefined });
+  } catch { throw new Error("Sem conexão com o servidor. Confira o Wi-Fi."); }
+  if (r.status === 401) { sair(false); throw new Error("Faça o login"); }
+  const dados = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(typeof dados.detail === "string" ? dados.detail : "Erro no servidor");
+  return dados;
+}
+
+// ---- retorno para o operador: mensagem, bipe e vibração
+let audio;
+const ganho = () => (app?.volume ? 1 : cfg.volume / 100);
+function bipe(tipo) {
+  // No app: bipe nativo do Android (toca sempre). No navegador: som da página.
+  if (app?.bipe) {
+    try { app.bipe(tipo || "ok"); } catch {}
+    if ((tipo === "erro" || tipo === "sirene") && navigator.vibrate) navigator.vibrate([150, 60, 150]);
+    return;
+  }
+  try {
+    audio = audio || new AudioContext();
+    const tons = tipo === "erro" ? [[330, 0], [260, 0.16]] : tipo === "alerta" ? [[880, 0], [880, 0.14]] : tipo === "sirene" ? [[1400, 0], [900, 0.15], [1400, 0.3], [900, 0.45]] : [[1800, 0]];
+    tons.forEach(([f, atraso]) => {
+      const o = audio.createOscillator(), v = audio.createGain();
+      o.type = "square"; o.frequency.value = f; v.gain.value = ganho();
+      o.connect(v).connect(audio.destination);
+      o.start(audio.currentTime + atraso); o.stop(audio.currentTime + atraso + 0.12);
+    });
+  } catch {}
+  if ((tipo === "erro" || tipo === "sirene") && navigator.vibrate) navigator.vibrate([150, 60, 150]);
+}
+let timerMsg;
+function msg(texto, tipo = "ok", som = true) {
+  const m = $("msg");
+  m.className = texto ? tipo : "";
+  m.textContent = texto || "";
+  if (texto && som) bipe(tipo);
+  clearTimeout(timerMsg);
+  if (texto) timerMsg = setTimeout(() => (m.className = ""), tipo === "erro" ? 5000 : 3000);
+}
+async function executar(botao, acao) {
+  if (botao) botao.disabled = true;
+  try { return await acao(); } catch (e) { msg(e.message, "erro"); } finally { if (botao) botao.disabled = false; }
+}
+function confirmar(titulo, html) {
+  return new Promise((ok) => {
+    $("cfTitulo").textContent = titulo; $("cfTexto").innerHTML = html;
+    const fim = (v) => { $("dlgConfirmar").close(); ok(v); };
+    $("cfSim").onclick = () => fim(true); $("cfNao").onclick = () => fim(false);
+    $("dlgConfirmar").showModal();
+  });
+}
+const barra = (feito, total) => `<div class="progresso ${feito >= total && total ? "completo" : ""}"><span style="width:${total ? Math.min(100, 100 * feito / total) : 0}%"></span></div>`;
+const seloSit = (s) => ({ ESTOQUE: '<span class="selo sucesso">em estoque</span>', EMITIDA: '<span class="selo info">emitida</span>',
+  BAIXADA: '<span class="selo perigo">baixada</span>', CANCELADA: '<span class="selo perigo">cancelada</span>' }[s] || '<span class="selo alerta">não cadastrada</span>');
+const nomeProduto = (t) => t.sku ? `<b>${esc(t.sku)}</b> ${esc(variante(t))}<div class="fraco">${esc(t.descricao)}</div>`
+  : t.sugerido ? `<span class="fraco">GTIN do EPC: ${esc(t.sugerido.sku)}</span>` : '<span class="fraco">etiqueta não cadastrada</span>';
+
+// ======================================================================= app (Android): gatilho, potência, RFID
+let modoGatilho = "rfid", potenciaAtual = 100;
+function definirGatilho(modo) {
+  modoGatilho = modo;
+  if (!app) return;
+  try { app.gatilhoRfid(modo === "rfid"); } catch {}
+  $("modo").textContent = modo === "rfid" ? "📡" : "▮▮";
+  $("modo").className = modo;
+}
+function definirPotencia(pct) { potenciaAtual = pct; try { app?.potencia(pct); } catch {} }
+if (app) {
+  $("modo").hidden = false;
+  $("modo").addEventListener("click", (ev) => { ev.stopPropagation(); definirGatilho(modoGatilho === "rfid" ? "barras" : "rfid");
+    msg(modoGatilho === "rfid" ? "Gatilho lê etiquetas RFID" : "Gatilho lê código de barras", "info", false); });
+}
+window.gatilhoRfidEvento = (apertado) => { $("modo").classList.toggle("lendo", apertado === "1"); };
+window.fimLeituraRfid = (n) => { if (Number(n) === 0 && telas[telaAtual].rfid) msg("O leitor não viu nenhuma etiqueta. Aproxime e segure o gatilho.", "alerta"); };
+window.leituraRfid = (epc) => {
+  const dado = String(epc).trim().toUpperCase();
+  if (!dado) return;
+  const t = telas[telaAtual];
+  if (t.rfid) t.rfid(dado);
+};
+let statusRfidTexto = "";
+window.statusRfid = (texto) => {
+  statusRfidTexto = texto;
+  const ok = !/indispon|erro|não /i.test(texto);
+  if (!ok || telaAtual === "menu") msg(texto, ok ? "info" : "erro", !ok);
+  if (ok) { definirGatilho(modoGatilho); definirPotencia(potenciaAtual); }
+};
+
+// Juntador: as leituras chegam uma a uma; a tela recebe em lotes (a cada 300 ms), sem repetir
+function juntador(aoLote, ms = 300) {
+  const j = { vistas: new Set(), fila: [], timer: null,
+    add(epc) { if (this.vistas.has(epc)) return; this.vistas.add(epc); this.fila.push(epc); if (!this.timer) this.timer = setTimeout(() => this.soltar(), ms); },
+    soltar() { this.timer = null; const l = this.fila.splice(0); if (l.length) aoLote(l); },
+    esquecer(epc) { epc ? this.vistas.delete(epc) : this.vistas.clear(); } };
+  return j;
+}
+
+// ======================================================================= captura do DataWedge (código de barras)
+const leitura = $("leitura");
+const ehEpc = (v) => /^[0-9A-F]{16,}$/i.test(v) && !/^\d{8,14}$/.test(v);
+const ehEditavel = (el) => el && el.matches && el.matches("input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea") && el !== leitura;
+function processarLeitura(bruto) {
+  const dado = String(bruto).trim().toUpperCase();
+  if (!dado) return;
+  const t = telas[telaAtual];
+  if (ehEpc(dado) && t.rfid) t.rfid(dado);
+  else if (t.codigo) t.codigo(dado);
+  else msg("Leitura não usada nesta tela: " + dado, "alerta");
+}
+const PAUSA = 100, RAPIDO = 50;
+let rajadaL = { n: 0, bloco: false, ultimo: 0 }, timerL;
+function finalizarLeitura() { clearTimeout(timerL); const v = leitura.value; leitura.value = ""; rajadaL = { n: 0, bloco: false, ultimo: 0 }; v.split(/\r?\n/).forEach(processarLeitura); }
+leitura.addEventListener("input", (ev) => {
+  if (leitura.value.includes("\n")) { const p = leitura.value.split(/\r?\n/); leitura.value = p.pop(); p.forEach(processarLeitura); if (!leitura.value) return; }
+  const agora = performance.now();
+  if (agora - rajadaL.ultimo > RAPIDO) rajadaL = { n: 0, bloco: false, ultimo: 0 };
+  rajadaL.n++; rajadaL.bloco ||= (ev.data || "").length >= 4; rajadaL.ultimo = agora;
+  clearTimeout(timerL);
+  timerL = setTimeout(() => { if ((rajadaL.bloco || rajadaL.n >= 4) && leitura.value.trim()) finalizarLeitura(); }, PAUSA);
+});
+leitura.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); finalizarLeitura(); } });
+// Leitura que caiu num campo de digitação: tira de lá e processa como leitura
+function leituraNoCampo(el, dado, base) { clearTimeout(el._t); el.value = base; el.dataset.antes = base; delete el.dataset.pendente; rajada = { el: null, n: 0 }; if (dado) processarLeitura(dado); }
+document.addEventListener("input", (ev) => {
+  const el = ev.target;
+  if (!ehEditavel(el) || el.dataset.livre) return;
+  const antes = el.dataset.antes ?? "";
+  if (ev.inputType !== "insertFromPaste" && el.value.length - antes.length >= 6 && el.value.startsWith(antes)) {
+    const dado = el.value.slice(antes.length);
+    el.dataset.pendente = dado; clearTimeout(el._t);
+    el._t = setTimeout(() => { if (el.dataset.pendente === dado) leituraNoCampo(el, dado, antes); }, PAUSA);
+    return;
+  }
+  el.dataset.antes = el.value;
+}, true);
+let rajada = { el: null, n: 0, ultimo: 0, base: "" };
+document.addEventListener("keydown", (ev) => {
+  const el = ev.target;
+  if (!ehEditavel(el) || ev.target.closest("dialog.pin")) return;
+  const t = performance.now();
+  if (ev.key.length === 1 && !el.dataset.livre) {
+    if (rajada.el !== el || t - rajada.ultimo > RAPIDO) rajada = { el, n: 0, base: el.value };
+    rajada.n++; rajada.ultimo = t; clearTimeout(el._t);
+    el._t = setTimeout(() => { if (rajada.el === el && rajada.n >= 6) leituraNoCampo(el, el.value.slice(rajada.base.length), rajada.base); }, PAUSA);
+    return;
+  }
+  if (ev.key !== "Enter") return;
+  if (el.form && el.closest("dialog")) return;
+  ev.preventDefault();
+  if (el.dataset.pendente) return leituraNoCampo(el, el.dataset.pendente, el.dataset.antes ?? "");
+  rajada = { el: null, n: 0 }; el.dataset.antes = el.value;
+  if (el.dataset.enter) telas[telaAtual][el.dataset.enter]?.();
+}, true);
+function focarLeitura() {
+  if (document.querySelector("dialog[open]")) return;
+  if (!ehEditavel(document.activeElement) && document.activeElement?.tagName !== "SELECT") leitura.focus({ preventScroll: true });
+}
+document.addEventListener("click", () => setTimeout(focarLeitura, 0));
+document.addEventListener("focusout", () => setTimeout(focarLeitura, 50));
+
+// ---- teclado na tela (o teclado do Android esconde as teclas no MC3300 por causa do teclado físico)
+const kb = { el: $("tecladoTela"), alvo: null };
+function abrirTeclado(alvo) {
+  if (!alvo) return;
+  kb.alvo = alvo;
+  const numerico = alvo.type === "number" || alvo.inputMode === "numeric";
+  const tecla = (t, c = "", r = t) => `<button type="button" data-tecla="${t}" class="${c}">${r}</button>`;
+  kb.el.className = numerico ? "numerico" : "";
+  kb.el.innerHTML = numerico
+    ? ["123", "456", "789"].map((l) => `<div class="linha">${[...l].map((c) => tecla(c)).join("")}</div>`).join("") +
+      `<div class="linha">${tecla("FECHAR", "esp", "✕")}${tecla("0")}${tecla("BS", "esp", "⌫")}</div><div class="linha">${tecla("OK", "ok", "OK ↵")}</div>`
+    : ["1234567890", "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM-."].map((l, i) => `<div class="linha">${[...l].map((c) => tecla(c)).join("")}${i === 2 ? tecla("BS", "esp", "⌫") : ""}</div>`).join("") +
+      `<div class="linha">${tecla("FECHAR", "esp", "✕")}${tecla("ESPACO", "esp", "espaço").replace("<button", '<button style="flex:4"')}${tecla("OK", "ok", "OK ↵").replace("<button", '<button style="flex:2"')}</div>`;
+  (alvo.closest("dialog") || document.body).appendChild(kb.el);
+  kb.el.hidden = false; document.body.classList.add("com-teclado");
+  setTimeout(() => alvo.scrollIntoView({ block: "center" }), 50);
+}
+function fecharTeclado() { kb.el.hidden = true; kb.alvo = null; document.body.classList.remove("com-teclado"); document.body.appendChild(kb.el); }
+kb.el.addEventListener("pointerdown", (ev) => ev.preventDefault());
+kb.el.addEventListener("click", (ev) => {
+  ev.stopPropagation();
+  const b = ev.target.closest("[data-tecla]"), el = kb.alvo;
+  if (!b || !el) return;
+  const t = b.dataset.tecla;
+  el.focus({ preventScroll: true });
+  if (t === "FECHAR") return fecharTeclado();
+  if (t === "OK") { fecharTeclado(); if (el.dataset.enter) telas[telaAtual][el.dataset.enter]?.(); else if (el.form) el.form.requestSubmit(); return; }
+  const ini = el.selectionStart ?? el.value.length, fim = el.selectionEnd ?? el.value.length;
+  if (t === "BS") el.setRangeText("", ini === fim && ini > 0 ? ini - 1 : ini, fim, "end");
+  else el.setRangeText(t === "ESPACO" ? " " : t, ini, fim, "end");
+  el.dataset.antes = el.value;
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+});
+document.addEventListener("click", (ev) => {
+  if (ev.target.closest("#tecladoTela, #teclado")) return;
+  if (cfg.teclado && ehEditavel(ev.target) && ev.target.type !== "range") abrirTeclado(ev.target);
+  else if (!kb.el.hidden) fecharTeclado();
+}, true);
+function marcarTecla() { $("teclado").classList.toggle("ligado", !!cfg.teclado); }
+$("teclado").addEventListener("click", (ev) => {
+  ev.stopPropagation();
+  cfg.teclado = !cfg.teclado; salvarCfg(); marcarTecla();
+  if (!cfg.teclado) { fecharTeclado(); return; }
+  const campo = [...tela.querySelectorAll("input")].find((el) => ehEditavel(el) && el.offsetParent !== null);
+  if (campo) { campo.focus(); abrirTeclado(campo); }
+  else { $("edDigitar").value = ""; $("dlgDigitar").showModal(); $("edDigitar").focus(); abrirTeclado($("edDigitar")); }
+});
+marcarTecla();
+$("digCancelar").addEventListener("click", () => $("dlgDigitar").close());
+$("formDigitar").addEventListener("submit", (ev) => { ev.preventDefault(); const v = $("edDigitar").value; $("dlgDigitar").close(); if (v.trim()) processarLeitura(v); });
+$("dlgDigitar").addEventListener("close", () => { if (kb.alvo === $("edDigitar")) fecharTeclado(); setTimeout(focarLeitura, 50); });
+
+// ======================================================================= servidor: hora, versão da tela, sinal do coletor
+let versaoTela = null, dataServidor = "";
+async function status() {
+  if (LOCAL) return;
+  try {
+    const s = await (await fetch("/api/status", { cache: "no-store" })).json();
+    dataServidor = s.data_hora;
+    if (versaoTela === null) versaoTela = s.tela;
+    else if (s.tela !== versaoTela && telaAtual === "menu" && !document.querySelector("dialog[open]")) location.reload();
+    rodape();
+  } catch { $("rodape").textContent = "⚠ Sem conexão com o servidor"; }
+}
+function rodape() {
+  if (LOCAL) { $("rodape").textContent = "Modo local (sem servidor)"; return; }
+  $("rodape").textContent = `${usuario ? usuario.nome + " · " : ""}${location.host} · ${dataServidor.slice(11, 16)}`;
+}
+let bateria = null;
+navigator.getBattery?.().then((b) => { bateria = Math.round(b.level * 100); b.addEventListener("levelchange", () => (bateria = Math.round(b.level * 100))); }).catch(() => {});
+async function sinal() {
+  if (LOCAL || !token) return;
+  let versao = null;
+  try { versao = app?.versao?.() || null; } catch {}
+  if (bateria === null) try { bateria = app?.bateria?.() ?? null; } catch {}
+  api("POST", "/api/dispositivos/sinal", { id: idColetor, nome: (app?.modelo?.() || "Coletor") + " · " + (usuario?.login || ""), versao,
+    bateria, rfid: statusRfidTexto || null, tela: telas[telaAtual]?.titulo }).catch(() => {});
+}
+setInterval(status, 10000); setInterval(sinal, 20000);
+
+// ======================================================================= dados de apoio
+let locais = [], motivos = [], produtos = null;
+async function carregarApoio() {
+  [locais, motivos] = await Promise.all([api("GET", "/api/locais"), fetch("/api/status").then((r) => r.json()).then((s) => s.motivos)]);
+  locais = locais.filter((l) => l.ativo);
+}
+const opcoesLocais = (sel, vazio) => (vazio ? `<option value="">${esc(vazio)}</option>` : "") +
+  locais.map((l) => `<option value="${l.id}" ${String(l.id) === String(sel) ? "selected" : ""}>${esc(l.codigo)} · ${esc(l.nome)}</option>`).join("");
+const nomeLocal = (id) => (locais.find((l) => String(l.id) === String(id)) || {}).codigo || "-";
+
+// ======================================================================= navegação
+let telaAtual = "menu";
+const tela = $("tela");
+const telas = {};
+function abrir(nome) {
+  if (!telas[nome]) nome = "menu";
+  if (LOCAL && !TELAS_LOCAIS.includes(nome)) nome = "menu";
+  if (!LOCAL && !token && nome !== "config") nome = "login";
+  if (nome !== "config") configLiberada = false;
+  const anterior = telas[telaAtual];
+  if (telaAtual !== nome) anterior?.sair?.();
+  telaAtual = nome;
+  $("titulo").textContent = telas[nome].titulo;
+  $("voltar").style.display = ["menu", "login"].includes(nome) ? "none" : "";
+  msg("");
+  definirGatilho(telas[nome].gatilho || "rfid");
+  definirPotencia(cfg[telas[nome].potencia || "potLeitura"] || 100);
+  telas[nome].abrir();
+  focarLeitura();
+  sinal();
+}
+window.addEventListener("hashchange", () => abrir(location.hash.slice(1)));
+$("voltar").addEventListener("click", () => { if (telaAtual !== "menu") location.hash = "menu"; });
+tela.addEventListener("click", (ev) => { const b = ev.target.closest("[data-acao]"); if (b) telas[telaAtual][b.dataset.acao]?.(b, b.dataset.valor); });
+$("btConfig").addEventListener("click", (ev) => { ev.stopPropagation(); location.hash = "config"; });
+
+// ======================================================================= LOGIN
+telas.login = {
+  titulo: "Entrar",
+  abrir() {
+    tela.innerHTML = `<div class="login"><div class="logo"><img src="${LOCAL ? "" : "/static/icone.svg"}" width="64" height="64" alt=""><b>TagStock</b><span class="fraco">RFID · controle de estoque</span></div>
+      <div class="card"><label class="campo"><span>Usuário</span><input id="lgUser" autocapitalize="none" autocomplete="username" data-livre="1"></label>
+      <label class="campo"><span>Senha</span><input id="lgSenha" type="password" data-livre="1" data-enter="entrar"></label>
+      <div class="botoes"><button class="b primario" data-acao="entrar">Entrar</button></div></div></div>`;
+  },
+  async entrar(b) {
+    await executar(b, async () => {
+      const r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" },
+                                            body: JSON.stringify({ login: $("lgUser").value.trim(), senha: $("lgSenha").value }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || "Não entrou");
+      token = d.token; usuario = d.usuario;
+      localStorage.setItem("tagstock.token", token); localStorage.setItem("tagstock.usuario", JSON.stringify(usuario));
+      await carregarApoio(); rodape();
+      location.hash = "menu"; abrir("menu");
+    });
+  },
+};
+function sair(avisarServidor = true) {
+  if (avisarServidor && token) fetch("/api/logout", { method: "POST", headers: { "X-Token": token } }).catch(() => {});
+  token = null; usuario = null;
+  try { localStorage.removeItem("tagstock.token"); localStorage.removeItem("tagstock.usuario"); } catch {}
+  if (telaAtual !== "login") { location.hash = "login"; abrir("login"); }
+}
+
+// ======================================================================= MENU
+const MENU = [
+  ["Produção", [["finalizarOF", "✅", "Finalizar OF"], ["gravarOF", "✍️", "Gravar OF"], ["vincular", "🔗", "Vincular"]]],
+  ["Estoque", [["entrada", "📥", "Entrada"], ["baixa", "📤", "Baixa"], ["transferir", "🔁", "Transferir"],
+               ["expedicao", "🚚", "Expedição"], ["inventario", "📋", "Inventário"], ["antifurto", "🛡️", "Antifurto"]]],
+  ["Ferramentas", [["consulta", "🔍", "Consulta"], ["localizar", "📍", "Localizar"], ["ler", "📡", "Ler etiqueta"],
+                   ["gravarLivre", "📝", "Gravar EPC"], ["remoto", "🖥️", "Estação PC"]]],
+];
+telas.menu = {
+  titulo: "TagStock",
+  abrir() {
+    tela.innerHTML = (LOCAL ? `<div class="card"><b>Modo local (sem servidor)</b><div class="fraco">Só Ler etiqueta e Gravar EPC funcionam.</div>
+        <div class="botoes"><button class="b primario" data-acao="conectar">Conectar ao servidor</button></div></div>` : "") +
+      MENU.map(([secao, itens]) => {
+        const vis = itens.filter(([id]) => !LOCAL || TELAS_LOCAIS.includes(id));
+        return vis.length ? `<div class="secao">${secao}</div><div class="grade-menu">${vis.map(([id, ic, nome]) =>
+          `<a class="tile" href="#${id}"><span class="ic">${ic}</span>${nome}</a>`).join("")}</div>` : "";
+      }).join("");
+  },
+  conectar() { try { app?.recarregarServidor?.(); } catch {} },
+};
+
+// ======================================================================= FINALIZAR OF (conferência da produção)
+telas.finalizarOF = {
+  titulo: "Finalizar OF",
+  potencia: "potLeitura",
+  async abrir() {
+    this.of = null;
+    tela.innerHTML = `<div class="card"><h2>Ordens abertas</h2><ul class="lista" id="foLista"><li class="vazio">Carregando…</li></ul></div>`;
+    try {
+      const ordens = await api("GET", "/api/ordens?status=ABERTA");
+      $("foLista").innerHTML = ordens.map((o) => `<li class="clicavel" data-acao="escolher" data-valor="${o.id}"><div class="info"><b>${esc(o.numero)}</b>
+          <div class="fraco">${esc((o.skus || "").slice(0, 50))}</div>${barra(o.lidas, o.quantidade)}</div><span class="qtd">${o.lidas}/${o.quantidade}</span></li>`).join("")
+        || '<li class="vazio">Nenhuma OF aberta</li>';
+    } catch (e) { msg(e.message, "erro"); }
+  },
+  async escolher(_b, id) {
+    this.j = juntador((l) => this.enviar(l));
+    this.recusas = [];
+    await this.carregar(id);
+  },
+  async carregar(id) {
+    this.of = await api("GET", "/api/ordens/" + (id || this.of.id));
+    this.desenhar();
+  },
+  desenhar() {
+    const o = this.of;
+    tela.innerHTML = `<div class="card"><h2>${esc(o.numero)}<span class="dir"><button class="link" data-acao="abrir">trocar</button></span></h2>
+        <div class="numeros"><div><b>${o.quantidade}</b><span>na OF</span></div><div><b style="color:var(--sucesso)">${o.lidas}</b><span>lidas</span></div>
+        <div><b>${Math.max(0, o.quantidade - o.lidas)}</b><span>faltam</span></div></div>${barra(o.lidas, o.quantidade)}</div>
+      ${o.lidas ? "" : '<div class="dica">Aperte o gatilho perto das <b>peças prontas</b> da OF</div>'}
+      <div class="card"><h2>Grade</h2><ul class="lista">${o.itens.map((i) => `<li class="${i.lidas === i.quantidade ? "ok" : ""}"><div class="info">
+          <b>${esc(i.sku)}</b> ${esc(variante(i))}${barra(i.lidas, i.quantidade)}</div><span class="qtd">${i.lidas}/${i.quantidade}</span></li>`).join("")}</ul></div>
+      ${this.recusas.length ? `<div class="card"><h2>Recusadas</h2><ul class="lista">${this.recusas.slice(0, 20).map((r) =>
+          `<li class="erro"><div class="info"><div class="mono">${esc(r.epc)}</div>${esc(r.motivo)}</div></li>`).join("")}</ul></div>` : ""}
+      <div class="botoes"><button class="b" data-acao="zerar">Zerar</button><button class="b sucesso" data-acao="finalizar">✔ Finalizar</button></div>`;
+  },
+  rfid(epc) { if (this.of) this.j.add(epc); else msg("Escolha a OF", "alerta"); },
+  async enviar(epcs) {
+    try {
+      const r = await api("POST", `/api/ordens/${this.of.id}/leituras`, { epcs });
+      const ruins = r.leituras.filter((x) => !x.ok);
+      this.recusas.unshift(...ruins);
+      this.of = r.ordem;
+      if (telaAtual !== "finalizarOF") return;
+      this.desenhar();
+      if (ruins.length) bipe("erro"); else bipe("ok");
+    } catch (e) { epcs.forEach((x) => this.j.esquecer(x)); msg(e.message, "erro"); }
+  },
+  async zerar(b) {
+    if (!(await confirmar("Zerar leituras", "Apagar as leituras desta OF?"))) return;
+    await executar(b, async () => { await api("DELETE", `/api/ordens/${this.of.id}/leituras`); this.j.esquecer(); this.recusas = []; await this.carregar(); });
+  },
+  async finalizar(b) {
+    const o = this.of, falta = o.quantidade - o.lidas;
+    if (!(await confirmar("Finalizar " + o.numero, `<p>${o.lidas} peça(s) entram no estoque de <b>${esc(o.local)}</b>.</p>` +
+      (falta > 0 ? `<p style="color:var(--alerta)">Faltam ${falta} peça(s): as não lidas ficam emitidas.</p>` : "")))) return;
+    await executar(b, async () => {
+      const r = await api("POST", `/api/ordens/${o.id}/finalizar`, {});
+      msg(`✓ ${r.entradas} peça(s) no estoque`, "ok");
+      this.abrir();
+    });
+  },
+};
+
+// ======================================================================= GRAVAR OF (sem impressora RFID: o coletor grava o EPC)
+telas.gravarOF = {
+  titulo: "Gravar OF",
+  potencia: "potGravar",
+  async abrir() {
+    this.of = null; this.proxima = null;
+    tela.innerHTML = `<div class="card"><h2>Escolha a OF</h2><ul class="lista" id="goLista"><li class="vazio">Carregando…</li></ul></div>`;
+    try {
+      const ordens = await api("GET", "/api/ordens?status=ABERTA");
+      $("goLista").innerHTML = ordens.map((o) => `<li class="clicavel" data-acao="escolher" data-valor="${o.id}"><div class="info"><b>${esc(o.numero)}</b>
+          <div class="fraco">${esc((o.skus || "").slice(0, 50))}</div></div><span class="qtd">${o.gravadas}/${o.quantidade}</span></li>`).join("")
+        || '<li class="vazio">Nenhuma OF aberta</li>';
+    } catch (e) { msg(e.message, "erro"); }
+  },
+  async escolher(_b, id) {
+    await executar(null, async () => { this.of = await api("GET", "/api/ordens/" + id); this.produto = ""; await this.proximo(); });
+  },
+  async proximo() {
+    const r = await api("GET", `/api/ordens/${this.of.id}/proxima` + (this.produto ? "?produto_id=" + this.produto : ""));
+    this.of = await api("GET", "/api/ordens/" + this.of.id);
+    this.proxima = r.etiqueta;
+    this.desenhar();
+  },
+  desenhar() {
+    const o = this.of, p = this.proxima;
+    const gravadas = o.itens.reduce((s, i) => s + i.gravadas, 0);
+    tela.innerHTML = `<div class="card"><h2>${esc(o.numero)}<span class="dir"><button class="link" data-acao="abrir">trocar</button></span></h2>
+        <label class="campo"><span>Produto</span><select id="goProd"><option value="">Todos, na ordem</option>${o.itens.map((i) =>
+          `<option value="${i.produto_id}" ${String(i.produto_id) === String(this.produto) ? "selected" : ""}>${esc(i.sku)} ${esc(variante(i))} (${i.gravadas}/${i.quantidade})</option>`).join("")}</select></label>
+        <div class="fraco">${gravadas} de ${o.quantidade} etiquetas gravadas</div>${barra(gravadas, o.quantidade)}</div>
+      ${p ? `<div class="card" style="text-align:center"><div class="fraco">Próxima etiqueta</div><div class="produto">${esc(p.sku)} ${esc(variante(p))}</div>
+          <div class="fraco">${esc(p.descricao)} · série ${esc(p.serial)}</div><div class="mono" style="font-size:15px;margin:6px 0">${esc(p.epc)}</div></div>
+        <div class="dica">Encoste o coletor numa etiqueta <b>virgem</b> (só ela perto) e toque em <b>Gravar</b> — ou aperte o gatilho</div>
+        <div class="botoes"><button class="b primario" id="goBt" data-acao="gravar">📝 Gravar</button></div>`
+        : '<div class="card"><p>✔ Todas as etiquetas deste produto/OF já foram gravadas.</p></div>'}`;
+    $("goProd").addEventListener("change", () => { this.produto = $("goProd").value; executar(null, () => this.proximo()); });
+  },
+  gravar(b) {
+    if (!this.proxima || this.gravando) return;
+    if (!app?.gravarEtiqueta) return msg("A gravação só funciona no app do coletor", "info");
+    this.gravando = true;
+    if (b) { b.disabled = true; b.textContent = "Gravando…"; }
+    msg("Gravando: mantenha o coletor encostado na etiqueta", "info", false);
+    try { app.gravarEtiqueta(this.proxima.epc, cfg.potGravar || 30); } catch (e) { this.gravando = false; msg(e.message, "erro"); }
+  },
+  rfid() { if (this.proxima && !this.gravando) this.gravar($("goBt")); },
+  async resultado(r) {
+    this.gravando = false;
+    if (!r.ok) { bipe("erro"); msg(r.mensagem, "erro", false); this.desenhar(); return; }
+    await executar(null, async () => {
+      await api("POST", "/api/etiquetas/gravacao", { epc: r.novo, antigo: r.antigo });
+      bipe("ok"); msg("✓ Gravada " + r.novo.slice(-8), "ok", false);
+      await this.proximo();
+    });
+  },
+};
+
+// ======================================================================= Tela genérica: lê etiquetas, confere e confirma
+// Usada por Vincular, Entrada, Baixa e Transferir.
+function telaOperacao(def) {
+  return {
+    titulo: def.titulo, potencia: def.potencia, gatilho: def.gatilho,
+    abrir() {
+      this.itens = new Map();
+      this.j = juntador((l) => this.conferir(l));
+      this.estado = def.inicio ? def.inicio() : {};
+      this.desenhar();
+    },
+    desenhar() {
+      const lista = [...this.itens.values()], ok = lista.filter((t) => t.ok);
+      tela.innerHTML = `<div class="card">${def.campos(this.estado)}</div>
+        ${def.topo ? def.topo(this.estado) : ""}
+        ${lista.length ? "" : `<div class="dica">${def.dica}</div>`}
+        <div class="card"><h2>${def.rotuloLista || "Lidas"} <span class="dir"><span class="contador" style="color:var(--sucesso)">${ok.length}</span>
+          ${lista.length > ok.length ? `<span class="selo perigo">${lista.length - ok.length} recusada(s)</span>` : ""}</span></h2>
+          <ul class="lista">${lista.map((t) => `<li class="${t.ok ? "ok" : "erro"}"><div class="info">${nomeProduto(t)}<div class="mono fraco">${esc(t.epc)}</div>
+            ${t.ok ? (t.local ? `<span class="fraco">${esc(t.local)}</span> ` : "") + seloSit(t.status) : esc(t.motivo)}</div>
+            <button class="x" data-acao="tirar" data-valor="${esc(t.epc)}">✕</button></li>`).join("")}</ul></div>
+        <div class="botoes"><button class="b" data-acao="limpar">Limpar</button>
+          <button class="b ${def.perigo ? "perigo" : "primario"}" data-acao="confirmar" ${ok.length ? "" : "disabled"}>${def.botao} (${ok.length})</button></div>`;
+      def.depois?.(this.estado, this);
+    },
+    rfid(epc) {
+      const erro = def.pronto?.(this.estado);
+      if (erro) return msg(erro, "alerta");
+      this.j.add(epc);
+    },
+    codigo(c) { def.codigo ? def.codigo(c, this.estado, this) : msg("Código " + c + " não usado aqui", "info"); },
+    async conferir(epcs) {
+      try {
+        const r = await api("POST", "/api/etiquetas/verificar", { epcs, operacao: def.operacao, ...def.params(this.estado) });
+        r.forEach((t) => this.itens.set(t.epc, t));
+        if (telaAtual !== def.id) return;
+        bipe(r.some((t) => !t.ok) ? "erro" : "ok");
+        this.desenhar();
+      } catch (e) { epcs.forEach((x) => this.j.esquecer(x)); msg(e.message, "erro"); }
+    },
+    reconferir() { const e = [...this.itens.keys()]; this.itens.clear(); this.j.esquecer(); e.forEach((x) => this.j.vistas.add(x)); if (e.length) this.conferir(e); else this.desenhar(); },
+    tirar(_b, epc) { this.itens.delete(epc); this.j.esquecer(epc); this.desenhar(); },
+    limpar() { this.itens.clear(); this.j.esquecer(); this.desenhar(); },
+    async confirmar(b) {
+      const epcs = [...this.itens.values()].filter((t) => t.ok).map((t) => t.epc);
+      if (def.confirmacao && !(await confirmar(def.titulo, def.confirmacao(epcs.length, this.estado)))) return;
+      await executar(b, async () => {
+        const r = await api("POST", def.url, { epcs, ...def.corpo(this.estado) });
+        msg(`✓ ${def.feito}: ${r.quantidade}` + (r.erros.length ? `\n${r.erros.length} recusada(s): ${r.erros[0].motivo}` : ""), r.erros.length ? "alerta" : "ok");
+        this.ultimo = { epcs: r.ok, operacao: def.operacao };
+        this.itens.clear(); this.j.esquecer(); this.desenhar();
+        def.aposConfirmar?.(this, r);
+      });
+    },
+  };
+}
+
+telas.vincular = telaOperacao({
+  id: "vincular", titulo: "Vincular etiquetas", operacao: "vincular", url: "/api/etiquetas/vincular", botao: "🔗 Vincular", feito: "Vinculadas",
+  potencia: "potGravar",
+  inicio: () => ({ produto: null, local: cfg.localEntrada || "", ativar: true }),
+  pronto: (e) => (e.produto ? null : "Primeiro bipe o código de barras do produto"),
+  campos: (e) => e.produto ? `<h2>Produto<span class="dir"><button class="link" data-acao="trocar">trocar</button></span></h2>
+        <div class="produto">${esc(e.produto.sku)} ${esc(variante(e.produto))}</div><div class="fraco">${esc(e.produto.descricao)}</div>
+        <div class="duas" style="margin-top:8px"><label class="campo"><span>Local</span><select id="vLocal">${opcoesLocais(e.local || (locais[0] || {}).id)}</select></label>
+        <label class="campo"><span>Situação</span><select id="vAtivar"><option value="1">Entra no estoque</option><option value="0" ${e.ativar ? "" : "selected"}>Só vincular</option></select></label></div>`
+      : `<label class="campo"><span>Produto (bipe o código de barras ou digite o SKU)</span><input id="vCod" data-enter="buscar" placeholder="EAN ou SKU"></label>
+        <div class="botoes"><button class="b primario" data-acao="buscar">Buscar</button></div>`,
+  dica: "Bipe o produto e depois leia as etiquetas (virgens, de fornecedor ou reaproveitadas)",
+  params: (e) => ({ produto_id: e.produto?.id }),
+  corpo: (e) => ({ produto_id: e.produto.id, local_id: +e.local || null, ativar: e.ativar }),
+  codigo: async (c, e, t) => {
+    if (ehEpc(c)) return t.rfid(c);
+    try { e.produto = await api("GET", "/api/produtos/codigo/" + encodeURIComponent(c)); definirGatilho("rfid"); bipe("ok"); t.reconferir(); }
+    catch (x) { msg(x.message, "erro"); }
+  },
+  depois: (e, t) => {
+    if (!e.produto) { definirGatilho("barras"); return; }
+    $("vLocal").onchange = () => { e.local = $("vLocal").value; cfg.localEntrada = e.local; salvarCfg(); };
+    $("vAtivar").onchange = () => { e.ativar = $("vAtivar").value === "1"; };
+    if (!e.local) e.local = $("vLocal").value;
+  },
+});
+telas.vincular.gatilho = "barras";
+telas.vincular.buscar = function () { const c = $("vCod")?.value.trim(); if (c) this.codigo(c); };
+telas.vincular.trocar = function () { this.estado.produto = null; this.limpar(); };
+
+telas.entrada = telaOperacao({
+  id: "entrada", titulo: "Entrada", operacao: "entrada", url: "/api/etiquetas/entrada", botao: "📥 Dar entrada", feito: "Entraram",
+  inicio: () => ({ local: cfg.localEntrada || (locais[0] || {}).id, documento: "" }),
+  campos: (e) => `<div class="duas"><label class="campo"><span>Local de entrada</span><select id="eLocal">${opcoesLocais(e.local)}</select></label>
+      <label class="campo"><span>Documento</span><input id="eDoc" value="${esc(e.documento)}" placeholder="NF / romaneio" data-livre="1"></label></div>`,
+  dica: "Leia as etiquetas <b>emitidas</b> (impressas/gravadas) das peças que estão chegando",
+  params: () => ({}),
+  corpo: (e) => ({ local_id: +e.local, documento: e.documento || null }),
+  depois: (e) => { $("eLocal").onchange = () => { e.local = $("eLocal").value; cfg.localEntrada = e.local; salvarCfg(); };
+                   $("eDoc").oninput = () => { e.documento = $("eDoc").value; }; },
+});
+
+telas.baixa = telaOperacao({
+  id: "baixa", titulo: "Baixa", operacao: "baixa", url: "/api/etiquetas/baixa", botao: "📤 Confirmar baixa", feito: "Baixadas", perigo: true,
+  potencia: "potBaixa",
+  inicio: () => ({ motivo: cfg.motivo || "VENDA", local: cfg.localBaixa || "", documento: "" }),
+  campos: (e) => `<div class="duas"><label class="campo"><span>Motivo</span><select id="bMot">${motivos.map((m) => `<option ${m === e.motivo ? "selected" : ""}>${m}</option>`).join("")}</select></label>
+      <label class="campo"><span>Sai do local</span><select id="bLocal">${opcoesLocais(e.local, "Qualquer local")}</select></label></div>
+      <label class="campo"><span>Documento</span><input id="bDoc" value="${esc(e.documento)}" placeholder="cupom, NF" data-livre="1"></label>`,
+  topo: () => telas.baixa?.ultimo?.epcs?.length ? `<div class="botoes" style="margin-bottom:8px"><button class="b" data-acao="desfazer">↩ Desfazer última baixa (${telas.baixa.ultimo.epcs.length})</button></div>` : "",
+  dica: "Leia as peças que estão saindo. Só entram na lista as que estão no estoque do local.",
+  rotuloLista: "Para baixar",
+  params: (e) => ({ local_id: +e.local || null }),
+  corpo: (e) => ({ motivo: e.motivo, local_id: +e.local || null, documento: e.documento || null }),
+  confirmacao: (n, e) => `Baixar <b>${n}</b> peça(s) por <b>${esc(e.motivo)}</b>?`,
+  depois: (e, t) => {
+    $("bMot").onchange = () => { e.motivo = $("bMot").value; cfg.motivo = e.motivo; salvarCfg(); };
+    $("bLocal").onchange = () => { e.local = $("bLocal").value; cfg.localBaixa = e.local; salvarCfg(); t.reconferir(); };
+    $("bDoc").oninput = () => { e.documento = $("bDoc").value; };
+  },
+});
+telas.baixa.desfazer = async function (b) {
+  if (!this.ultimo?.epcs?.length) return;
+  await executar(b, async () => { const r = await api("POST", "/api/etiquetas/estorno", { epcs: this.ultimo.epcs }); msg(`↩ ${r.quantidade} peça(s) voltaram ao estoque`); this.ultimo = null; this.desenhar(); });
+};
+
+telas.transferir = telaOperacao({
+  id: "transferir", titulo: "Transferir", operacao: "transferencia", url: "/api/etiquetas/transferencia", botao: "🔁 Transferir", feito: "Transferidas",
+  inicio: () => ({ origem: "", destino: cfg.localDestino || (locais[1] || locais[0] || {}).id, documento: "" }),
+  campos: (e) => `<div class="duas"><label class="campo"><span>De</span><select id="tOri">${opcoesLocais(e.origem, "Qualquer local")}</select></label>
+      <label class="campo"><span>Para</span><select id="tDest">${opcoesLocais(e.destino)}</select></label></div>`,
+  dica: "Leia as peças que vão para o outro local",
+  params: (e) => ({ local_id: +e.origem || null }),
+  corpo: (e) => ({ destino_id: +e.destino, origem_id: +e.origem || null }),
+  confirmacao: (n, e) => `Transferir <b>${n}</b> peça(s) para <b>${esc(nomeLocal(e.destino))}</b>?`,
+  depois: (e, t) => { $("tOri").onchange = () => { e.origem = $("tOri").value; t.reconferir(); };
+                      $("tDest").onchange = () => { e.destino = $("tDest").value; cfg.localDestino = e.destino; salvarCfg(); }; },
+});
+
+// ======================================================================= EXPEDIÇÃO (conferência de embarque)
+telas.expedicao = {
+  titulo: "Expedição",
+  async abrir() {
+    this.p = null;
+    tela.innerHTML = `<div class="card"><h2>Pedidos em conferência</h2><ul class="lista" id="exLista"><li class="vazio">Carregando…</li></ul></div>`;
+    try {
+      const lista = await api("GET", "/api/pedidos?status=ABERTO");
+      $("exLista").innerHTML = lista.map((p) => `<li class="clicavel" data-acao="escolher" data-valor="${p.id}"><div class="info"><b>${esc(p.numero)}</b>
+          <div class="fraco">${p.tipo === "VENDA" ? esc(p.cliente || "venda") : "→ " + esc(p.destino)}</div>${barra(p.lidas, p.quantidade)}</div>
+          <span class="qtd">${p.lidas}/${p.quantidade}</span></li>`).join("") || '<li class="vazio">Nenhum pedido aberto (crie no PC)</li>';
+    } catch (e) { msg(e.message, "erro"); }
+  },
+  async escolher(_b, id) { this.j = juntador((l) => this.enviar(l)); this.recusas = []; this.p = await api("GET", "/api/pedidos/" + id); this.desenhar(); },
+  desenhar() {
+    const p = this.p;
+    tela.innerHTML = `<div class="card"><h2>${esc(p.numero)}<span class="dir"><button class="link" data-acao="abrir">trocar</button></span></h2>
+        <div class="fraco">${p.tipo === "VENDA" ? "Venda · " + esc(p.cliente || "") : "Transferência → " + esc(p.destino)} · sai de ${esc(p.local || "qualquer local")}</div>
+        <div class="numeros" style="margin-top:6px"><div><b>${p.quantidade}</b><span>pedido</span></div><div><b style="color:var(--sucesso)">${p.lidas}</b><span>conferidas</span></div>
+        <div><b>${Math.max(0, p.quantidade - p.lidas)}</b><span>faltam</span></div></div>${barra(p.lidas, p.quantidade)}</div>
+      <div class="card"><h2>Itens</h2><ul class="lista">${p.itens.map((i) => `<li class="${i.lidas === i.quantidade ? "ok" : ""}"><div class="info"><b>${esc(i.sku)}</b> ${esc(variante(i))}
+          <div class="fraco">${esc(i.descricao)}</div></div><span class="qtd">${i.lidas}/${i.quantidade}</span></li>`).join("")}</ul></div>
+      ${this.recusas.length ? `<div class="card"><h2>Recusadas</h2><ul class="lista">${this.recusas.slice(0, 20).map((r) =>
+          `<li class="erro"><div class="info">${nomeProduto(r)}${esc(r.motivo)}</div></li>`).join("")}</ul></div>` : ""}
+      <div class="botoes"><button class="b sucesso" data-acao="finalizar">✔ Finalizar ${p.tipo === "VENDA" ? "(baixa)" : "(transferir)"}</button></div>`;
+  },
+  rfid(epc) { if (this.p) this.j.add(epc); else msg("Escolha o pedido", "alerta"); },
+  async enviar(epcs) {
+    try {
+      const r = await api("POST", `/api/pedidos/${this.p.id}/leituras`, { epcs });
+      const ruins = r.leituras.filter((x) => !x.ok);
+      this.recusas.unshift(...ruins); this.p = r.pedido;
+      if (telaAtual !== "expedicao") return;
+      bipe(ruins.length ? "erro" : "ok"); this.desenhar();
+      if (ruins.length) msg(ruins[0].motivo + (ruins.length > 1 ? ` (+${ruins.length - 1})` : ""), "erro", false);
+    } catch (e) { epcs.forEach((x) => this.j.esquecer(x)); msg(e.message, "erro"); }
+  },
+  async finalizar(b) {
+    const p = this.p, falta = p.quantidade - p.lidas;
+    if (!p.lidas) return msg("Nenhuma peça conferida", "alerta");
+    if (!(await confirmar("Finalizar " + p.numero, falta > 0 ? `Faltam <b>${falta}</b> peça(s). Finalizar mesmo assim?` : "Todas as peças conferidas. Finalizar?"))) return;
+    await executar(b, async () => { const r = await api("POST", `/api/pedidos/${p.id}/finalizar`); msg(`✓ Pedido finalizado: ${r.quantidade} peça(s)`); this.abrir(); });
+  },
+};
+
+// ======================================================================= INVENTÁRIO
+telas.inventario = {
+  titulo: "Inventário",
+  potencia: "potInventario",
+  async abrir() {
+    this.inv = null; clearInterval(this.timer);
+    tela.innerHTML = `<div class="card"><h2>Inventários abertos</h2><ul class="lista" id="ivLista"><li class="vazio">Carregando…</li></ul></div>
+      <div class="card"><h2>Novo inventário</h2><label class="campo"><span>Local</span><select id="ivLocal">${opcoesLocais("", "Todos os locais")}</select></label>
+        <div class="botoes"><button class="b primario" data-acao="novo">▶ Iniciar</button></div></div>`;
+    try {
+      const lista = (await api("GET", "/api/inventarios")).filter((i) => i.status === "ABERTO");
+      $("ivLista").innerHTML = lista.map((i) => `<li class="clicavel" data-acao="escolher" data-valor="${i.id}"><div class="info"><b>${esc(i.nome)}</b>
+          <div class="fraco">${esc(i.local || "Todos os locais")}${i.grupo ? " · " + esc(i.grupo) : ""}</div></div><span class="qtd">${num(i.lidas_agora)}</span></li>`).join("")
+        || '<li class="vazio">Nenhum inventário aberto</li>';
+    } catch (e) { msg(e.message, "erro"); }
+  },
+  async novo(b) {
+    await executar(b, async () => {
+      const local = $("ivLocal").value;
+      const r = await api("POST", "/api/inventarios", { nome: "Coletor " + (local ? nomeLocal(local) : "geral") + " " + dataServidor.slice(0, 16), local_id: +local || null });
+      await this.escolher(null, r.id);
+    });
+  },
+  async escolher(_b, id) {
+    this.j = juntador((l) => this.enviar(l), 500);
+    this.lidasAgora = 0;
+    await this.carregar(id);
+    clearInterval(this.timer);
+    this.timer = setInterval(() => { if (telaAtual === "inventario" && this.inv) this.carregar().catch(() => {}); }, 4000);
+  },
+  async carregar(id) {
+    const inv = await api("GET", "/api/inventarios/" + (id || this.inv.id));
+    this.inv = inv;
+    if (telaAtual !== "inventario") return;
+    const c = inv.contagem, fora = c.SOBRA + c.OUTRO_LOCAL + c.BAIXADA + c.DESCONHECIDA;
+    tela.innerHTML = `<div class="card"><h2>${esc(inv.nome)}<span class="dir"><button class="link" data-acao="abrir">trocar</button></span></h2>
+        <div class="fraco">${esc(inv.local || "Todos os locais")}</div>
+        <div class="numeros" style="margin-top:6px"><div><b>${num(inv.lidas)}</b><span>lidas</span></div><div><b>${num(inv.esperado)}</b><span>no sistema</span></div>
+          <div><b>${inv.acuracidade ?? "-"}%</b><span>acuracidade</span></div>
+          <div><b style="color:var(--sucesso)">${num(c.OK)}</b><span>encontradas</span></div><div><b style="color:var(--perigo)">${num(c.FALTA)}</b><span>faltando</span></div>
+          <div><b style="color:var(--alerta)">${num(fora)}</b><span>sobrando</span></div></div>${barra(c.OK, inv.esperado)}</div>
+      <div class="dica">Ande pelo local com o <b>gatilho apertado</b>. Cada peça conta uma vez só.</div>
+      <div class="card"><h2>Diferenças por produto</h2><ul class="lista">${inv.produtos.filter((p) => p.diferenca !== 0).slice(0, 40).map((p) =>
+          `<li><div class="info"><b>${esc(p.sku)}</b> ${esc(variante(p))}<div class="fraco">sistema ${p.esperado} · lido ${p.lido}</div></div>
+           <span class="qtd" style="color:${p.diferenca < 0 ? "var(--perigo)" : "var(--alerta)"}">${p.diferenca > 0 ? "+" : ""}${p.diferenca}</span></li>`).join("") || '<li class="vazio">Sem diferenças até agora</li>'}</ul></div>
+      <div class="botoes"><button class="b" data-acao="exportar">💾 Salvar contagem</button><button class="b sucesso" data-acao="finalizar">✔ Finalizar</button></div>`;
+  },
+  rfid(epc) { if (this.inv) this.j.add(epc); else msg("Escolha ou inicie um inventário", "alerta"); },
+  async enviar(epcs) {
+    try { const r = await api("POST", `/api/inventarios/${this.inv.id}/leituras`, { epcs, dispositivo: idColetor }); if (r.novas) bipe("ok"); this.carregar().catch(() => {}); }
+    catch (e) { epcs.forEach((x) => this.j.esquecer(x)); msg(e.message, "erro"); }
+  },
+  exportar() {
+    const linhas = ["EPC;Situacao;SKU;Descricao;Cor;Tamanho;Local"].concat(this.inv.etiquetas.map((t) =>
+      [t.epc, t.situacao, t.sku || "", (t.descricao || "").replace(/;/g, ","), t.cor || "", t.tamanho || "", t.local || ""].join(";")));
+    const nome = `contagem-inv${this.inv.id}-${dataServidor.slice(0, 16).replace(/\D/g, "")}.csv`;
+    try {
+      if (app?.salvarArquivo) { const onde = app.salvarArquivo(nome, "﻿" + linhas.join("\n")); msg("✓ Salvo em " + onde, "ok"); return; }
+    } catch (e) { return msg("Não salvou: " + e.message, "erro"); }
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["﻿" + linhas.join("\n")], { type: "text/csv" })); a.download = nome; a.click();
+  },
+  async finalizar(b) {
+    const inv = this.inv;
+    if (!(await confirmar("Finalizar inventário", `<p>Encontradas <b>${inv.contagem.OK}</b> de <b>${inv.esperado}</b>.</p>
+        <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="ivAjustar" checked> Ajustar o estoque (faltas saem, sobras entram)</label>`))) return;
+    const ajustar = $("ivAjustar").checked;
+    await executar(b, async () => { const r = await api("POST", `/api/inventarios/${inv.id}/finalizar`, { ajustar }); msg(`✓ Finalizado · ${r.ajustes} ajuste(s)`); this.abrir(); });
+  },
+  sair() { clearInterval(this.timer); },
+};
+
+// ======================================================================= ANTIFURTO (ALERTi)
+telas.antifurto = {
+  titulo: "Antifurto",
+  potencia: "potLeitura",
+  abrir() {
+    this.alarmes = new Map(); this.continuo = false;
+    this.j = juntador((l) => this.checar(l), 200);
+    this.desenhar();
+  },
+  desenhar() {
+    const lista = [...this.alarmes.values()];
+    tela.innerHTML = `<div class="card"><label class="campo"><span>Ponto</span><input id="afPonto" value="${esc(cfg.pontoAntifurto || "Saída")}" data-livre="1"></label>
+        <div class="botoes"><button class="b ${this.continuo ? "perigo" : "primario"}" data-acao="alternar">${this.continuo ? "■ Parar vigilância" : "▶ Vigiar sem parar"}</button></div></div>
+      ${lista.length ? `<div class="alarme">🚨 ${lista.length} peça(s) NÃO vendida(s)</div>` : '<div class="dica">Peça vendida passa em silêncio. Peça que ainda está <b>no estoque</b> dispara o alarme.</div>'}
+      <div class="card"><h2>Alarmes</h2><ul class="lista">${lista.map((t) => `<li class="erro"><div class="info">${nomeProduto(t)}<div class="mono fraco">${esc(t.epc)}</div>
+          <span class="fraco">${esc(t.hora)} · ${esc(t.local || "")}</span></div><button class="b" style="flex:none;min-height:40px" data-acao="conferido" data-valor="${esc(t.epc)}">Conferido</button></li>`).join("")
+          || '<li class="vazio">Nenhum alarme</li>'}</ul></div>`;
+    $("afPonto").onchange = () => { cfg.pontoAntifurto = $("afPonto").value; salvarCfg(); };
+    try { app?.manterTelaLigada?.(this.continuo); } catch {}
+  },
+  alternar() { this.continuo = !this.continuo; try { app?.lerContinuo?.(this.continuo); } catch {} this.desenhar(); },
+  rfid(epc) { this.j.add(epc); },
+  async checar(epcs) {
+    try {
+      const r = await api("POST", "/api/antifurto?ponto=" + encodeURIComponent(cfg.pontoAntifurto || "Saída"), { epcs });
+      const novos = r.filter((x) => x.alarme && !this.alarmes.has(x.epc));
+      novos.forEach((x) => this.alarmes.set(x.epc, { ...x, hora: new Date().toLocaleTimeString("pt-BR").slice(0, 5) }));
+      // quem não disparou pode ser lido de novo depois (ex.: foi vendido e volta a passar)
+      r.filter((x) => !x.alarme).forEach((x) => setTimeout(() => this.j.esquecer(x.epc), 5000));
+      if (novos.length) { bipe("sirene"); if (telaAtual === "antifurto") this.desenhar(); }
+    } catch (e) { epcs.forEach((x) => this.j.esquecer(x)); msg(e.message, "erro"); }
+  },
+  conferido(_b, epc) { this.alarmes.delete(epc); setTimeout(() => this.j.esquecer(epc), 10000); this.desenhar(); },
+  sair() { if (this.continuo) { try { app?.lerContinuo?.(false); app?.manterTelaLigada?.(false); } catch {} } this.continuo = false; },
+};
+
+// ======================================================================= CONSULTA
+telas.consulta = {
+  titulo: "Consulta",
+  potencia: "potBaixa",
+  abrir() {
+    tela.innerHTML = `<div class="dica">Leia <b>uma etiqueta</b> para ver o produto, onde está e o histórico — ou bipe o <b>código de barras</b> para ver o saldo por local</div><div id="csRes"></div>`;
+  },
+  async rfid(epc) {
+    if (this.ocupado) return;
+    this.ocupado = true;
+    try {
+      const h = await api("GET", "/api/epc/" + epc), t = h.etiqueta, d = h.decodificado;
+      bipe("ok");
+      $("csRes").innerHTML = `<div class="card"><div class="mono">${esc(epc)}</div><div class="fraco">${esc(d.esquema)}${d.gtin ? " · GTIN " + esc(d.gtin) + " · série " + esc(d.serial) : ""}</div></div>` +
+        (t ? `<div class="card"><div class="produto">${esc(t.sku)} ${esc(variante(t))}</div><div>${esc(t.descricao)}</div>
+            <div style="margin-top:6px">${seloSit(t.status)} <b>${esc(t.local || "")}</b>${t.ordem ? ` <span class="fraco">· ${esc(t.ordem)}</span>` : ""}</div></div>
+          <div class="card"><h2>Histórico</h2><ul class="lista">${h.movimentos.slice(0, 12).map((m) => `<li><div class="info"><b>${esc(m.tipo)}</b>
+            ${m.motivo ? `<span class="fraco">${esc(m.motivo)}</span>` : ""}<div class="fraco">${dataBR(m.data_hora)} · ${esc([m.origem_local, m.destino_local].filter(Boolean).join(" → "))} · ${esc(m.usuario || "")}</div></div></li>`).join("")}</ul></div>`
+          : `<div class="card">${seloSit(null)}${h.sugerido ? `<div style="margin-top:6px">O GTIN do EPC é de <b>${esc(h.sugerido.sku)}</b> ${esc(h.sugerido.descricao)}. Use Vincular.</div>` : ""}</div>`);
+    } catch (e) { msg(e.message, "erro"); } finally { setTimeout(() => (this.ocupado = false), 600); }
+  },
+  async codigo(c) {
+    try {
+      const p = await api("GET", "/api/produtos/codigo/" + encodeURIComponent(c));
+      const est = await api("GET", "/api/estoque?q=" + encodeURIComponent(p.sku));
+      const meu = est.filter((e) => e.produto_id === p.id);
+      bipe("ok");
+      $("csRes").innerHTML = `<div class="card"><div class="produto">${esc(p.sku)} ${esc(variante(p))}</div><div>${esc(p.descricao)}</div>
+          <div class="fraco">${p.gtin ? "GTIN " + esc(p.gtin) : ""}</div></div>
+        <div class="card"><h2>Saldo<span class="dir"><span class="contador">${p.saldo}</span></span></h2><ul class="lista">${meu.map((e) =>
+          `<li><div class="info">${esc(e.local)}</div><span class="qtd">${e.quantidade}</span></li>`).join("") || '<li class="vazio">Sem peças no estoque</li>'}</ul></div>`;
+    } catch (e) { msg(e.message, "erro"); }
+  },
+};
+
+// ======================================================================= LOCALIZAR (quente/frio)
+telas.localizar = {
+  titulo: "Localizar",
+  potencia: "potLocalizar",
+  abrir() {
+    this.alvo = null; this.valor = 0; this.ultimo = 0; this.procurando = false;
+    tela.innerHTML = `<div class="card"><label class="campo"><span>Etiqueta (EPC) ou bipe o produto</span>
+        <input id="lcEpc" class="mono" autocapitalize="characters" autocomplete="off" data-enter="definir" placeholder="Digite ou escolha na lista"></label>
+        <div class="botoes"><button class="b primario" data-acao="definir">Procurar esta etiqueta</button></div></div><div id="lcCorpo"></div>`;
+    this.lista();
+  },
+  async lista(produtoId) {
+    try {
+      const tags = await api("GET", "/api/etiquetas?status=ESTOQUE&limite=500" + (produtoId ? "&produto_id=" + produtoId : ""));
+      if (telaAtual !== "localizar" || this.alvo || !$("lcCorpo")) return;
+      $("lcCorpo").innerHTML = `<div class="card"><h2>Etiquetas em estoque</h2><input id="lcBusca" placeholder="Filtrar por produto ou fim do EPC" data-livre="1" style="margin-bottom:6px">
+        <ul class="lista" id="lcLista"></ul></div>`;
+      const desenhar = () => {
+        const f = $("lcBusca").value.trim().toUpperCase();
+        $("lcLista").innerHTML = tags.filter((t) => !f || [t.sku, t.descricao, t.epc, t.cor, t.tamanho].some((v) => String(v || "").toUpperCase().includes(f))).slice(0, 80)
+          .map((t) => `<li class="clicavel" data-acao="escolher" data-valor="${esc(t.epc)}"><div class="info"><b>${esc(t.sku)}</b> ${esc(variante(t))} <span class="fraco">${esc(t.local)}</span>
+            <div class="mono fraco">${esc(t.epc)}</div></div></li>`).join("") || '<li class="vazio">Nenhuma etiqueta</li>';
+      };
+      $("lcBusca").addEventListener("input", desenhar); desenhar();
+    } catch (e) { msg(e.message, "erro"); }
+  },
+  async codigo(c) {
+    if (ehEpc(c)) { $("lcEpc").value = c; return this.definir(); }
+    try { const p = await api("GET", "/api/produtos/codigo/" + encodeURIComponent(c)); this.alvo = null; this.lista(p.id); } catch (e) { msg(e.message, "erro"); }
+  },
+  escolher(_b, epc) { $("lcEpc").value = epc; this.definir(); },
+  rfid() {},
+  async definir() {
+    const epc = $("lcEpc").value.trim().toUpperCase();
+    if (!/^[0-9A-F]{8,}$/.test(epc)) return msg("EPC inválido (hexadecimal)", "erro");
+    if (!app) return msg("Localizar funciona no app do coletor", "alerta");
+    this.alvo = epc; this.valor = 0;
+    try { app.localizar(epc); } catch { return msg("Atualize o app TagStock", "erro"); }
+    definirGatilho("rfid");
+    let info = "etiqueta não cadastrada";
+    try { const h = await api("GET", "/api/epc/" + epc); if (h.etiqueta) info = `${h.etiqueta.sku} ${variante(h.etiqueta)} · ${h.etiqueta.local || ""}`; } catch {}
+    $("lcCorpo").innerHTML = `<div class="card" style="text-align:center"><div class="mono">${esc(epc)}</div><div class="fraco">${esc(info)}</div>
+        <div class="radar"><div class="radar-barra" id="lcBarra"></div></div><div class="contador" id="lcValor">—</div>
+        <div id="lcTexto" class="fraco">Aperte e segure o gatilho e vá andando</div>
+        <div class="botoes" style="margin-top:10px"><button class="b" data-acao="alternar" id="lcBotao">▶ Procurar sem o gatilho</button>
+          <button class="b" data-acao="abrir">Trocar</button></div></div>`;
+    this.pintar();
+  },
+  alternar() { this.procurando = !this.procurando; try { app.procurar(this.procurando); } catch {} $("lcBotao").textContent = this.procurando ? "■ Parar" : "▶ Procurar sem o gatilho"; },
+  proximidade(v) { if (v < 0) { this.valor = 0; this.ultimo = 0; this.pintar("parado"); return; } this.valor = v; this.ultimo = performance.now(); this.pintar(); },
+  pintar(estado) {
+    const b = $("lcBarra"); if (!b) return;
+    const v = this.valor;
+    b.style.width = v + "%"; b.style.background = `hsl(${Math.round(220 - 2.2 * v)}, 85%, 50%)`;
+    $("lcValor").textContent = estado === "parado" || !this.ultimo ? "—" : v + "%";
+    $("lcTexto").textContent = estado === "parado" ? "Parado. Aperte o gatilho para procurar." : !this.ultimo ? "Aperte e segure o gatilho e vá andando"
+      : v >= 80 ? "🔥 Muito quente: está aqui!" : v >= 50 ? "Quente" : v >= 20 ? "Morno" : "❄ Frio";
+  },
+  tique() {
+    if (telaAtual !== "localizar" || !this.alvo) return;
+    const agora = performance.now();
+    if (this.ultimo && agora - this.ultimo > 800) { this.valor = Math.max(0, this.valor - 10); this.pintar(); }
+    if (this.ultimo && this.valor > 0 && agora - (this.ultimoBipe || 0) > 1000 - 9 * this.valor) {
+      this.ultimoBipe = agora;
+      if (app?.bipe) { try { app.bipe("tique"); } catch {} return; }
+      try { audio = audio || new AudioContext(); const o = audio.createOscillator(), g = audio.createGain();
+        o.type = "square"; o.frequency.value = 600 + 12 * this.valor; g.gain.value = ganho(); o.connect(g).connect(audio.destination); o.start(); o.stop(audio.currentTime + 0.05); } catch {}
+    }
+  },
+  sair() { this.alvo = null; this.procurando = false; try { app?.localizar(""); } catch {} },
+};
+window.proximidadeRfid = (v) => telas.localizar.proximidade(Number(v));
+setInterval(() => telas.localizar.tique(), 50);
+
+// ======================================================================= LER ETIQUETA (verificação: EPC, chip e memória pelo TID)
+const FABRICANTES = { 0x001: "Impinj", 0x002: "Texas Instruments", 0x003: "Alien Technology", 0x004: "Intelleflex", 0x005: "Atmel", 0x006: "NXP",
+  0x007: "ST Microelectronics", 0x008: "EP Microelectronics", 0x00A: "Sentech", 0x00B: "EM Microelectronic", 0x00C: "Renesas", 0x00F: "Quanray", 0x010: "Fujitsu", 0x018: "Ceitec" };
+const CHIPS = { "001-100": ["Monza 4D", 128, 32], "001-105": ["Monza 4QT", 128, 512], "001-10C": ["Monza 4E", 496, 128], "001-130": ["Monza 5", 128, 32],
+  "001-160": ["Monza R6", 96, 0], "001-170": ["Monza R6-P", 128, 64], "001-190": ["M730", 128, 0], "001-191": ["M750", 96, 32],
+  "006-810": ["UCODE 7", 128, 0], "006-894": ["UCODE 8", 128, 0], "006-915": ["UCODE 9", 96, 0], "003-412": ["Higgs-3", 480, 512], "003-414": ["Higgs-4", 128, 128], "003-811": ["Higgs-9", 496, 688] };
+function chipDoTid(tid) {
+  if (!/^E2[0-9A-F]{6}/i.test(tid || "")) return null;
+  const mdid = parseInt(tid.slice(2, 5), 16) & 0x1FF, tmn = parseInt(tid.slice(5, 8), 16);
+  const chave = mdid.toString(16).toUpperCase().padStart(3, "0") + "-" + tmn.toString(16).toUpperCase().padStart(3, "0");
+  const fab = FABRICANTES[mdid] || `fabricante 0x${mdid.toString(16).toUpperCase()}`, c = CHIPS[chave];
+  return c ? { nome: `${fab} ${c[0]}`, epcMax: c[1], user: c[2] } : { nome: `${fab}, modelo 0x${tmn.toString(16).toUpperCase().padStart(3, "0")}` };
+}
+window.detalheEtiqueta = (json) => { try { telas.ler.detalhe(JSON.parse(json)); } catch {} };
+telas.ler = {
+  titulo: "Ler etiqueta",
+  abrir() {
+    this.detalhes = new Map(); this.lidas = new Map();
+    try { app?.detalharEtiquetas?.(true); } catch {}
+    tela.innerHTML = `<div class="card"><p class="fraco" style="margin:0"><b>Só verificação</b>: aperte o gatilho perto da etiqueta. Nada é gravado nem enviado.</p></div>
+      <div class="card"><h2>Etiquetas lidas <span class="dir"><span class="contador" id="lrCont">0</span></span></h2><ul class="lista" id="lrLista"></ul>
+        <div class="botoes" style="margin-top:8px"><button class="b" data-acao="limpar">Limpar</button></div></div>`;
+    this.desenhar();
+  },
+  rfid(epc) {
+    const n = (this.lidas.get(epc) || 0) + 1; this.lidas.delete(epc); this.lidas.set(epc, n);
+    if (n === 1) bipe("ok");
+    clearTimeout(this.timer); this.timer = setTimeout(() => this.desenhar(), 80);
+  },
+  desenhar() {
+    if (!$("lrLista")) return;
+    $("lrCont").textContent = this.lidas.size;
+    $("lrLista").innerHTML = [...this.lidas].reverse().map(([epc, n]) => {
+      const d = this.detalhes.get(epc), chip = chipDoTid(d?.tid);
+      let gs1 = "";
+      if (/^30/.test(epc) && epc.length === 24) gs1 = "SGTIN-96 (GS1)"; else if (/^35/.test(epc) && epc.length === 24) gs1 = "GID-96 (GS1)";
+      return `<li><div class="info"><div class="mono" style="font-size:16px;font-weight:700">${esc(epc)}</div>
+        <div class="fraco">${epc.length * 4} bits${gs1 ? " · " + gs1 : ""} · lida ${n}x</div>
+        ${d ? `<div style="font-size:13px">${d.regiao ? esc(d.regiao) + " · " : ""}${esc(d.canais || "")}</div>` : ""}
+        ${chip ? `<div style="font-size:13px">Chip: <b>${esc(chip.nome)}</b>${chip.epcMax !== undefined ? ` · EPC até ${chip.epcMax} bits · usuário ${chip.user} bits` : ""}</div>` : ""}
+        ${d?.tid ? `<div class="mono fraco">TID ${esc(d.tid)}</div>` : app ? '<div class="fraco" style="font-size:12px">TID ao soltar o gatilho…</div>' : ""}</div></li>`;
+    }).join("") || '<li class="vazio">Nenhuma etiqueta lida ainda</li>';
+  },
+  detalhe(d) { if (!d?.epc) return; if (d.tid || !this.detalhes.get(d.epc)?.tid) this.detalhes.set(d.epc, d); this.desenhar(); },
+  limpar() { this.lidas.clear(); this.detalhes.clear(); this.desenhar(); try { app?.detalharEtiquetas?.(false); app?.detalharEtiquetas?.(true); } catch {} },
+  codigo(c) { msg("Código de barras: " + c, "info"); },
+  sair() { try { app?.detalharEtiquetas?.(false); } catch {} },
+};
+
+// ======================================================================= GRAVAR EPC LIVRE (funciona sem servidor)
+telas.gravarLivre = {
+  titulo: "Gravar EPC",
+  gatilho: "barras",
+  potencia: "potGravar",
+  abrir() {
+    tela.innerHTML = `<div class="card"><label class="campo"><span>EPC a gravar (bipe um código ou digite, hexadecimal)</span>
+        <input id="glEpc" class="mono" autocomplete="off" autocapitalize="characters" data-enter="gravar" placeholder="Até 24 caracteres 0-9 A-F"></label>
+        <div class="fraco">Encoste o coletor na etiqueta (só ela perto) e toque em Gravar.</div>
+        <div class="botoes"><button class="b primario" data-acao="gravar" id="glBt">📝 Gravar</button></div></div><div id="glRes"></div>`;
+  },
+  codigo(c) { $("glEpc").value = c; $("glEpc").dataset.antes = c; bipe("ok"); },
+  rfid(c) { this.codigo(c); },
+  gravar() {
+    const v = $("glEpc").value.trim().toUpperCase();
+    if (!/^[0-9A-F]{1,24}$/.test(v)) return msg("Até 24 caracteres, só 0-9 e A-F", "alerta");
+    if (!app?.gravarEtiqueta) return msg("A gravação só funciona no app do coletor", "info");
+    $("glBt").disabled = true; msg("Gravando…", "info", false);
+    app.gravarEtiqueta(v, cfg.potGravar || 30);
+  },
+  async resultado(r) {
+    if ($("glBt")) $("glBt").disabled = false;
+    if (!r.ok) { bipe("erro"); msg(r.mensagem, "erro", false); return; }
+    bipe("ok"); msg("✓ Gravado", "ok", false);
+    let cad = "";
+    if (!LOCAL && token) try { await api("POST", "/api/etiquetas/gravacao", { epc: r.novo, antigo: r.antigo }); cad = "Cadastro atualizado (EPC emitido pelo sistema)."; } catch { cad = ""; }
+    $("glRes").innerHTML = `<div class="card"><h2>✓ Gravada</h2><div class="fraco">Antes</div><div class="mono">${esc(r.antigo)}</div>
+      <div class="fraco" style="margin-top:6px">Agora</div><div class="mono"><b>${esc(r.novo)}</b></div><div class="fraco">${cad}</div></div>`;
+  },
+};
+window.resultadoGravacao = (json) => {
+  try {
+    const r = JSON.parse(json);
+    if (telaAtual === "remoto") telas.remoto.resultadoGravacao(r);
+    else if (telaAtual === "gravarOF") telas.gravarOF.resultado(r);
+    else telas.gravarLivre.resultado(r);
+  } catch {}
+};
+
+// ======================================================================= ESTAÇÃO PC (o PC comanda o leitor)
+telas.remoto = {
+  titulo: "Estação PC",
+  abrir() {
+    this.apos = null; this.enviadas = new Set(); this.buffer = [];
+    tela.innerHTML = `<div class="card" style="text-align:center;margin-top:40px;padding:28px 12px"><div style="font-size:64px;line-height:1.1">🖥️</div>
+        <div id="rmEstado" style="font-size:20px;font-weight:700;margin-top:10px">Conectando…</div>
+        <div class="fraco" style="margin-top:8px">Deixe esta tela aberta: o PC manda ler, parar e gravar. O gatilho também lê.</div></div>`;
+    try { app?.manterTelaLigada?.(true); } catch {}
+    clearInterval(this.timer); this.timer = setInterval(() => this.buscar(), 400); this.buscar();
+  },
+  sair() { clearInterval(this.timer); this.timer = null; try { app?.lerContinuo?.(false); app?.manterTelaLigada?.(false); } catch {} },
+  estado(t, ok) { if ($("rmEstado")) { $("rmEstado").textContent = t; $("rmEstado").style.color = ok ? "var(--sucesso)" : ""; } },
+  async buscar() {
+    if (this.buscando) return;
+    this.buscando = true;
+    try {
+      const r = await api("GET", `/api/remoto/comandos?apos=${this.apos ?? -1}&dispositivo=${encodeURIComponent(idColetor)}`);
+      if (telaAtual !== "remoto") return;
+      if (this.apos === null) { this.apos = r.ultimo; this.estado("✓ Conectado ao PC", true); return; }
+      for (const c of r.comandos) { this.apos = c.id; this.executar(c); }
+    } catch { this.estado("Sem conexão com o servidor"); } finally { this.buscando = false; }
+  },
+  executar(c) {
+    if (c.acao === "ler") { definirPotencia(c.potencia || 100); try { app?.lerContinuo?.(true); } catch {} this.estado("Lendo (comando do PC)…", true); }
+    else if (c.acao === "parar") { try { app?.lerContinuo?.(false); } catch {} this.estado("✓ Conectado ao PC", true); this.evento("parou", {}); }
+    else if (c.acao === "limpar") { this.enviadas.clear(); }
+    else if (c.acao === "gravar") {
+      try { app?.lerContinuo?.(false); } catch {}
+      if (!app?.gravarEtiqueta) return this.evento("gravacao", { ok: false, mensagem: "Coletor sem o app TagStock" });
+      this.estado("Gravando: encoste o coletor na etiqueta…", true);
+      app.gravarEtiqueta(c.texto, c.potencia || cfg.potGravar || 30);
+    } else if (c.acao === "escanear") { try { app?.escanearCodigo?.(); } catch {} }
+  },
+  evento(tipo, dados) { api("POST", "/api/remoto/evento", { tipo, dados }).catch(() => {}); },
+  resultadoGravacao(r) { bipe(r.ok ? "ok" : "erro"); this.estado(r.ok ? "✓ Gravado " + r.novo.slice(-8) : r.mensagem, r.ok); this.evento("gravacao", r); },
+  rfid(epc) {
+    if (!this.enviadas.has(epc)) { this.enviadas.add(epc); bipe("ok"); }
+    this.buffer.push(epc);
+    if (!this.timerEnvio) this.timerEnvio = setTimeout(() => this.enviar(), 250);
+  },
+  async enviar() {
+    this.timerEnvio = null;
+    const epcs = this.buffer; this.buffer = [];
+    if (epcs.length) try { await api("POST", "/api/remoto/leituras", { epcs }); } catch { epcs.forEach((e) => this.enviadas.delete(e)); }
+  },
+  codigo(c) { this.evento("codigo", { codigo: c }); },
+};
+
+// ======================================================================= CONFIG (PIN 1234)
+const SENHA_CONFIG = "1234";
+let configLiberada = false, pin = "";
+function mostrarPin() { $("pinVisor").textContent = pin ? "•".repeat(pin.length) : "—"; }
+function teclaPin(t) {
+  if (t === "apagar") pin = pin.slice(0, -1);
+  else if (t === "ok") { if (pin === SENHA_CONFIG) { $("dlgSenha").close(); configLiberada = true; telas.config.abrir(); return; } pin = ""; msg("PIN incorreto", "alerta"); }
+  else if (pin.length < 8) pin += t;
+  mostrarPin();
+}
+$("pinTeclado").addEventListener("click", (ev) => { const b = ev.target.closest("button"); if (b) teclaPin(b.dataset.t || b.textContent.trim()); });
+$("dlgSenha").addEventListener("keydown", (ev) => {
+  if (/^[0-9]$/.test(ev.key)) teclaPin(ev.key); else if (ev.key === "Backspace") teclaPin("apagar"); else if (ev.key === "Enter") teclaPin("ok"); else return;
+  ev.preventDefault();
+});
+$("senhaCancelar").addEventListener("click", () => { $("dlgSenha").close(); location.hash = "menu"; });
+$("dlgSenha").addEventListener("cancel", (ev) => { ev.preventDefault(); $("dlgSenha").close(); location.hash = "menu"; });
+telas.config = {
+  titulo: "Config",
+  abrir() {
+    if (!configLiberada) { tela.innerHTML = ""; pin = ""; mostrarPin(); if (!$("dlgSenha").open) $("dlgSenha").showModal(); return; }
+    let volume = cfg.volume;
+    try { if (app?.volumeAtual) volume = app.volumeAtual(); } catch {}
+    tela.innerHTML = `<div class="card"><h2>Usuário</h2><div>${usuario ? `<b>${esc(usuario.nome)}</b> (${esc(usuario.login)})` : "Ninguém conectado"}</div>
+        <div class="fraco">Coletor ${esc(idColetor)}</div>${usuario ? '<div class="botoes"><button class="b" data-acao="sairUsuario">Sair (trocar usuário)</button></div>' : ""}</div>
+      <div class="card"><h2>Volume do bipe <span class="dir"><b id="cfVolTxt">${volume}%</b></span></h2>
+        <input type="range" id="cfVolume" min="0" max="100" step="10" value="${volume}" style="padding:0"></div>
+      <div class="card"><h2>Potência da antena RFID</h2>
+        ${[["potLeitura", "Leitura (OF, entrada, expedição, antifurto)"], ["potBaixa", "Baixa e consulta"], ["potInventario", "Inventário"], ["potLocalizar", "Localizar"], ["potGravar", "Gravar / vincular"]].map(([k, nome]) =>
+          `<div style="margin:8px 0 4px">${nome} <b style="float:right" id="${k}Txt">${cfg[k]}%</b></div><input type="range" data-pot="${k}" min="10" max="100" step="10" value="${cfg[k]}" style="padding:0">`).join("")}
+        <p class="fraco" style="margin:6px 0 0">Menos potência lê só o que está perto (evita pegar peça vizinha).</p></div>
+      <div class="card"><h2>Servidor</h2><div>${LOCAL ? "<b>Modo local</b>" : `<b class="mono">${esc(location.origin)}</b>`}</div>
+        <div class="botoes" style="margin-top:8px"><button class="b primario" data-acao="procurar">📡 Procurar na rede</button><button class="b" data-acao="digitar">✏️ Digitar</button></div></div>`;
+    $("cfVolume").addEventListener("input", () => { cfg.volume = Number($("cfVolume").value); salvarCfg(); $("cfVolTxt").textContent = cfg.volume + "%"; try { app?.volume?.(cfg.volume); } catch {} });
+    $("cfVolume").addEventListener("change", () => bipe("ok"));
+    tela.querySelectorAll("[data-pot]").forEach((r) => r.addEventListener("input", () => { cfg[r.dataset.pot] = Number(r.value); salvarCfg(); $(r.dataset.pot + "Txt").textContent = r.value + "%"; }));
+  },
+  sairUsuario() { sair(true); },
+  procurar() { try { app?.procurarServidor ? app.procurarServidor() : msg("A busca é feita pelo app do coletor", "info"); } catch {} },
+  digitar() { try { app ? app.servidor() : msg("Abra http://IP-DO-PC:8100/m", "info"); } catch {} },
+};
+
+// ======================================================================= início
+(async () => {
+  rodape();
+  if (!LOCAL) {
+    await status();
+    if (token) {
+      try { usuario = await api("GET", "/api/eu"); await carregarApoio(); } catch (e) { if (token) msg(e.message, "erro"); }
+    }
+    setInterval(() => { if (token) carregarApoio().catch(() => {}); }, 60000);
+  }
+  abrir(location.hash.slice(1) || "menu");
+})();
+</script>
+</body>
+</html>

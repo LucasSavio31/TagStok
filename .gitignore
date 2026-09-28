@@ -1,0 +1,5 @@
+server/dist/
+server/build/
+server/*.spec
+pyinstaller.log
+exe.log
