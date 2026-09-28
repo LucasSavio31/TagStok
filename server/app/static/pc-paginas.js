@@ -37,16 +37,21 @@ PAGINAS.painel = {
           <div class="par"><div class="e" style="height:${130 * x.entradas / maxDia}px"></div><div class="s" style="height:${130 * x.baixas / maxDia}px"></div></div>
           <span>${x.dia.slice(8, 10)}/${x.dia.slice(5, 7)}</span></div>`).join("")}</div></div>
       <div class="grade2">
-        <div class="card"><h2>Abaixo do estoque mínimo</h2>${tabela([
-          {t: "Produto", f: p => `<b>${esc(p.sku)}</b> ${esc(p.descricao)} <span class="fraco">${esc(variante(p))}</span>`},
-          {t: "Mínimo", k: "estoque_min", n: 1}, {t: "Saldo", n: 1, f: p => `<b style="color:var(--perigo)">${p.saldo}</b>`}],
-          d.abaixo_minimo, {vazio: "Nenhum produto abaixo do mínimo", alt: "300px"})}</div>
-        <div class="card"><h2>Últimos inventários</h2>${tabela([
-          {t: "Inventário", f: i => esc(i.nome)}, {t: "Data", f: i => dataBR(i.fechado_em)},
-          {t: "Acuracidade", n: 1, f: i => i.esperado ? (100 * i.ok / i.esperado).toFixed(1) + "%" : "-"},
-          {t: "Faltas", k: "faltas", n: 1}, {t: "Sobras", k: "sobras", n: 1}], d.inventarios, {vazio: "Nenhum inventário finalizado", alt: "300px", clic: 1})}</div>
+        <div class="card"><h2>Abaixo do estoque mínimo</h2><div id="pnMin"></div></div>
+        <div class="card"><h2>Últimos inventários</h2><div id="pnInv"></div></div>
       </div>`;
-    ligarLinhas($$(".card")[4], d.inventarios, i => ir("inventario/" + i.id));
+    listaSel($("#pnMin"), [
+      {t: "SKU", f: p => `<b>${esc(p.sku)}</b>`}, {t: "Descrição", f: p => `${esc(p.descricao)} <span class="fraco">${esc(variante(p))}</span>`},
+      {t: "Mínimo", k: "estoque_min", n: 1}, {t: "Saldo", n: 1, f: p => `<b style="color:var(--perigo)">${p.saldo}</b>`, csv: p => p.saldo}],
+      d.abaixo_minimo, {vazio: "Nenhum produto abaixo do mínimo", alt: "300px", nome: "abaixo-do-minimo",
+        acoes: [["🖨 Gerar OF de reposição", "p", async l => {
+          const ordem = await post("/api/ordens", {itens: l.map(p => ({produto_id: p.id, quantidade: Math.max(1, p.estoque_min - p.saldo)})), observacao: "Reposição do estoque mínimo"});
+          avisar(`${ordem.numero} gerada com ${ordem.quantidade} etiqueta(s)`); ir("ordem/" + ordem.id); }]]});
+    listaSel($("#pnInv"), [
+      {t: "Inventário", f: i => esc(i.nome)}, {t: "Data", f: i => dataBR(i.fechado_em)},
+      {t: "Acuracidade", n: 1, f: i => i.esperado ? (100 * i.ok / i.esperado).toFixed(1) + "%" : "-"},
+      {t: "Faltas", k: "faltas", n: 1}, {t: "Sobras", k: "sobras", n: 1}], d.inventarios,
+      {vazio: "Nenhum inventário finalizado", alt: "300px", nome: "inventarios", aoClicar: i => ir("inventario/" + i.id)});
   },
 };
 
@@ -67,11 +72,16 @@ PAGINAS.estoque = {
       const q = new URLSearchParams({local_id: $("#fLocal").value, grupo: $("#fGrupo").value, q: $("#fBusca").value});
       const linhas = await get("/api/estoque?" + q);
       $("#tot").textContent = `${num(linhas.reduce((s, l) => s + l.quantidade, 0))} peça(s) · ${linhas.length} linha(s) produto × local`;
-      $("#lista").innerHTML = tabela([
-        {t: "Local", k: "local"}, {t: "SKU", f: l => `<b>${esc(l.sku)}</b>`}, {t: "Descrição", k: "descricao"},
+      // Ações em lote: valem para TODAS as peças dos itens (produto × local) selecionados
+      const pecas = async l => (await Promise.all(l.map(x => get(`/api/etiquetas?status=ESTOQUE&produto_id=${x.produto_id}&local_id=${x.local_id}&limite=5000`)))).flat();
+      const emPecas = ([rotulo, classe, fn]) => [rotulo + " (todas as peças)", classe, async l => fn(await pecas(l))];
+      listaSel($("#lista"), [
+        {t: "Local", k: "local"}, {t: "SKU", f: l => `<b>${esc(l.sku)}</b>`, csv: l => l.sku}, {t: "Descrição", k: "descricao"},
         {t: "Cor", k: "cor"}, {t: "Tam.", k: "tamanho"}, {t: "Grupo", k: "grupo"}, {t: "GTIN", k: "gtin", cl: "mono"},
-        {t: "Qtd", n: 1, f: l => `<b>${num(l.quantidade)}</b>`}], linhas, {clic: 1, vazio: "Nenhuma peça no estoque"});
-      ligarLinhas($("#lista"), linhas, l => mostrarEtiquetasProduto(l.produto_id, l.local_id, `${l.sku} em ${l.local}`));
+        {t: "Qtd", n: 1, f: l => `<b>${num(l.quantidade)}</b>`, csv: l => l.quantidade}], linhas,
+        {chave: l => l.produto_id + "-" + l.local_id, vazio: "Nenhuma peça no estoque", nome: "estoque",
+         aoClicar: l => mostrarEtiquetasProduto(l.produto_id, l.local_id, `${l.sku} em ${l.local}`),
+         acoes: acoesEtiquetas(carregar, ["transferencia", "baixa"]).map(emPecas)});
     };
     ["fLocal", "fGrupo"].forEach(id => $("#" + id).onchange = () => tentar(carregar));
     let t; $("#fBusca").oninput = () => { clearTimeout(t); t = setTimeout(() => tentar(carregar), 300); };
@@ -81,10 +91,11 @@ PAGINAS.estoque = {
 
 async function mostrarEtiquetasProduto(produtoId, localId, titulo) {
   const lista = await get(`/api/etiquetas?status=ESTOQUE&produto_id=${produtoId}&local_id=${localId || ""}&limite=5000`);
-  abrirDlg("Etiquetas: " + titulo, `<div class="fraco" style="margin-bottom:8px">${lista.length} etiqueta(s). Clique para ver o histórico.</div>` +
-    tabela([{t: "EPC", k: "epc", cl: "mono"}, {t: "OF", k: "ordem"}, {t: "Série", k: "serial", n: 1}, {t: "Última leitura", f: t => dataBR(t.ultima_leitura)}],
-           lista, {clic: 1, alt: "55vh"}), [], {largo: true});
-  ligarLinhas($("#dlgConteudo"), lista, t => mostrarEtiqueta(t.epc));
+  abrirDlg("Etiquetas: " + titulo, `<div class="fraco" style="margin-bottom:8px">${lista.length} etiqueta(s). Clique para ver o histórico.</div><div id="dlgEtqs"></div>`,
+    [], {largo: true});
+  listaSel($("#dlgEtqs"), [{t: "EPC", k: "epc", cl: "mono"}, {t: "OF", k: "ordem"}, {t: "Série", k: "serial", n: 1}, {t: "Última leitura", f: t => dataBR(t.ultima_leitura)}],
+    lista, {chave: t => t.epc, alt: "55vh", nome: "etiquetas", aoClicar: t => mostrarEtiqueta(t.epc),
+            acoes: acoesEtiquetas(async () => { fecharDlg(); abrir(); }, ["transferencia", "baixa", "cancelar"])});
 }
 
 // ============================================================ Etiquetas / rastreio
@@ -102,10 +113,9 @@ PAGINAS.etiquetas = {
     const carregar = async () => {
       const q = new URLSearchParams({status: $("#fSt").value, local_id: $("#fLocal").value, q: $("#fBusca").value, limite: 500});
       const lista = await get("/api/etiquetas?" + q);
-      $("#lista").innerHTML = tabela([{t: "EPC", k: "epc", cl: "mono"}, {t: "Produto", f: descProduto}, {t: "Situação", f: t => selo(t.status)},
+      listaSel($("#lista"), [{t: "EPC", k: "epc", cl: "mono"}, {t: "Produto", f: descProduto}, {t: "Situação", f: t => selo(t.status), csv: t => t.status},
         {t: "Local", k: "local"}, {t: "OF", k: "ordem"}, {t: "Atualizada", f: t => dataBR(t.atualizada_em)}], lista,
-        {clic: 1, vazio: "Nenhuma etiqueta"});
-      ligarLinhas($("#lista"), lista, t => mostrarEtiqueta(t.epc));
+        {chave: t => t.epc, vazio: "Nenhuma etiqueta", nome: "etiquetas", aoClicar: t => mostrarEtiqueta(t.epc), acoes: acoesEtiquetas(carregar)});
     };
     ["fSt", "fLocal"].forEach(id => $("#" + id).onchange = () => tentar(carregar));
     let t; $("#fBusca").oninput = () => { clearTimeout(t); t = setTimeout(() => tentar(carregar), 300); };
@@ -126,17 +136,18 @@ async function mostrarEtiqueta(epc) {
       <div class="kpi"><div class="rot">Local</div><div class="val" style="font-size:18px">${esc(t.local || "-")}</div></div>
       <div class="kpi"><div class="rot">Origem</div><div>${esc(t.origem)}${t.ordem ? "<br>OF " + esc(t.ordem) : ""}<br><span class="fraco">última leitura ${dataBR(t.ultima_leitura) || "-"}</span></div></div></div>`
       : `<div class="dica">Etiqueta não cadastrada.${h.sugerido ? ` O GTIN do EPC é do produto <b>${esc(h.sugerido.sku)} ${esc(h.sugerido.descricao)}</b>.` : ""} Use a Estação RFID → Vincular.</div>`}
-    <h4 style="margin:10px 0 6px">Histórico</h4>
-    ${tabela([{t: "Data/hora", f: m => dataBR(m.data_hora)}, {t: "Tipo", k: "tipo"}, {t: "Qtd", n: 1, f: m => m.quantidade > 0 ? "+1" : m.quantidade < 0 ? "-1" : ""},
-              {t: "De → para", f: m => [m.origem_local, m.destino_local].filter(Boolean).join(" → ")}, {t: "Motivo", k: "motivo"},
-              {t: "Documento", k: "documento"}, {t: "Quem", f: m => esc([m.usuario, m.origem].filter(Boolean).join(" · "))}], h.movimentos,
-             {vazio: "Sem movimentos", alt: "40vh"})}`;
+    <h4 style="margin:10px 0 6px">Histórico</h4><div id="dlgHist"></div>`;
   const botoes = [];
   if (t?.status === "BAIXADA") botoes.push(["Estornar baixa", "", async () => { await post("/api/etiquetas/estorno", {epcs: [h.epc]}); avisar("Estornada"); mostrarEtiqueta(h.epc); }]);
   if (t && ["EMITIDA", "ESTOQUE"].includes(t.status)) botoes.push(["Cancelar etiqueta", "perigo", async () => {
     const m = prompt("Motivo do cancelamento (etiqueta danificada, perdida...)"); if (m === null) return;
     await post("/api/etiquetas/cancelar", {epcs: [h.epc], motivo: m}); avisar("Etiqueta cancelada"); mostrarEtiqueta(h.epc); }]);
   abrirDlg("Etiqueta", html, botoes, {largo: true});
+  listaSel($("#dlgHist"), [{t: "Data/hora", f: m => dataBR(m.data_hora), csv: m => m.data_hora}, {t: "Tipo", k: "tipo"},
+    {t: "Qtd", n: 1, f: m => m.quantidade > 0 ? "+1" : m.quantidade < 0 ? "-1" : ""},
+    {t: "De → para", f: m => esc([m.origem_local, m.destino_local].filter(Boolean).join(" → "))}, {t: "Motivo", k: "motivo"},
+    {t: "Documento", k: "documento"}, {t: "Quem", f: m => esc([m.usuario, m.origem].filter(Boolean).join(" · "))}], h.movimentos,
+    {vazio: "Sem movimentos", alt: "40vh", nome: "historico-" + h.epc});
 }
 
 // ============================================================ Seletor de produtos (grade) para OF e pedido
@@ -159,10 +170,15 @@ async function seletorItens(el, opts = {}) {
   };
   const desenhar = () => {
     const lista = filtrados().slice(0, 400);
-    $(".sLista", el).innerHTML = tabela([{t: "SKU", f: p => `<b>${esc(p.sku)}</b>`}, {t: "Descrição", k: "descricao"}, {t: "Cor", k: "cor"},
+    const definir = async (l, v) => { l.forEach(p => qtd.set(p.id, v)); desenhar(); resumo(); };
+    listaSel($(".sLista", el), [{t: "SKU", f: p => `<b>${esc(p.sku)}</b>`, csv: p => p.sku}, {t: "Descrição", k: "descricao"}, {t: "Cor", k: "cor"},
       {t: "Tam.", k: "tamanho"}, {t: "GTIN", k: "gtin", cl: "mono"}, ...(opts.saldo ? [{t: "Saldo", k: "saldo", n: 1}] : []),
-      {t: "Quantidade", n: 1, f: p => `<input type="number" min="0" data-id="${p.id}" value="${qtd.get(p.id) || ""}" style="width:90px;text-align:right">`}],
-      lista, {alt: "42vh", vazio: "Nenhum produto (cadastre em Produtos)"});
+      {t: "Quantidade", n: 1, f: p => `<input type="number" min="0" data-id="${p.id}" value="${qtd.get(p.id) || ""}" style="width:90px;text-align:right">`, csv: p => qtd.get(p.id) || 0}],
+      lista, {alt: "42vh", vazio: "Nenhum produto (cadastre em Produtos)", nome: "grade",
+        acoes: [["Quantidade das selecionadas…", "", async l => {
+                  const v = await escolher("Quantidade", `${l.length} produto(s) selecionado(s).`, "Quantidade de cada um", null, "1");
+                  if (v !== null) await definir(l, Math.max(0, parseInt(v) || 0)); }],
+                ["Zerar selecionadas", "", l => definir(l, 0)]]});
     $$("input[data-id]", el).forEach(i => i.oninput = () => { qtd.set(+i.dataset.id, Math.max(0, parseInt(i.value) || 0)); resumo(); });
   };
   $(".sBusca", el).oninput = desenhar; $(".sGrupo", el).onchange = desenhar;
@@ -185,12 +201,18 @@ PAGINAS.ordens = {
         <button class="p" id="btNova">+ Nova OF</button></span></h2><div id="lista"></div></div>`;
     const carregar = async () => {
       const lista = await get("/api/ordens?status=" + $("#fSt").value);
-      $("#lista").innerHTML = tabela([{t: "OF", f: o => `<b>${esc(o.numero)}</b>`}, {t: "Documento", k: "documento"}, {t: "Produtos", f: o => `${o.itens} · <span class="fraco">${esc((o.skus || "").slice(0, 60))}</span>`},
+      listaSel($("#lista"), [{t: "OF", f: o => `<b>${esc(o.numero)}</b>`, csv: o => o.numero}, {t: "Documento", k: "documento"},
+        {t: "Produtos", f: o => `${o.itens} · <span class="fraco">${esc((o.skus || "").slice(0, 60))}</span>`},
         {t: "Peças", k: "quantidade", n: 1}, {t: "Impressas", n: 1, f: o => o.impressas + o.gravadas ? num(Math.max(o.impressas, o.gravadas)) : "-"},
-        {t: "Conferência", f: o => `${progresso(o.lidas, o.quantidade)}<span class="fraco">${o.lidas}/${o.quantidade}</span>`},
-        {t: "Local", k: "local"}, {t: "Situação", f: o => selo(o.status)}, {t: "Criada", f: o => dataBR(o.criada_em)}], lista,
-        {clic: 1, vazio: "Nenhuma OF"});
-      ligarLinhas($("#lista"), lista, o => ir("ordem/" + o.id));
+        {t: "Conferência", f: o => `${progresso(o.lidas, o.quantidade)}<span class="fraco">${o.lidas}/${o.quantidade}</span>`, csv: o => `${o.lidas}/${o.quantidade}`},
+        {t: "Local", k: "local"}, {t: "Situação", f: o => selo(o.status), csv: o => o.status}, {t: "Criada", f: o => dataBR(o.criada_em)}], lista,
+        {vazio: "Nenhuma OF", nome: "ordens", aoClicar: o => ir("ordem/" + o.id),
+         acoes: [["🚫 Cancelar selecionadas", "perigo", async l => {
+           const abertas = l.filter(o => o.status === "ABERTA");
+           if (!abertas.length) return avisar("Só OF aberta pode ser cancelada", "info");
+           if (!await confirmar("Cancelar OFs", `Cancelar ${abertas.length} OF(s) aberta(s)? As etiquetas ainda não usadas são canceladas.` +
+             (abertas.length < l.length ? `<br>${l.length - abertas.length} selecionada(s) não estão abertas e ficam como estão.` : ""))) return;
+           await emLote(abertas, "OFs canceladas", o => post(`/api/ordens/${o.id}/cancelar`), carregar); }]]});
     };
     $("#fSt").onchange = () => tentar(carregar);
     $("#btNova").onclick = () => novaOrdem();
@@ -216,9 +238,10 @@ PAGINAS.ordem = {
   titulo: "OF",
   async abrir(el, id) {
     const impressoras = (await get("/api/impressoras")).filter(i => i.ativo);
-    let o;
+    const selGrade = new Set(), selEtqs = new Set();   // a seleção continua quando a tela redesenha (a cada leitura)
+    let o, etqs = [];
     const desenhar = async () => {
-      o = await get("/api/ordens/" + id);
+      [o, etqs] = await Promise.all([get("/api/ordens/" + id), get(`/api/ordens/${id}/etiquetas`)]);
       $("#titulo").textContent = "OF " + o.numero;
       const aberta = o.status === "ABERTA";
       el.innerHTML = `<div class="botoes" style="margin-bottom:12px"><button onclick="ir('ordens')">← Ordens</button>${selo(o.status)}
@@ -234,27 +257,37 @@ PAGINAS.ordem = {
           <div class="card"><h2>2 · Finalizar: ler as peças prontas<span class="dir"><button id="btLimpar">Zerar leituras</button></span></h2>
             <div class="fraco">Leia as peças com o coletor (▶ Ler no topo, ou no coletor: tela <b>Finalizar OF</b>) ou com um leitor USB.</div>
             ${campoCaptura("capOF")}<div id="ultimas" class="fraco"></div></div>` : ""}
-        <div class="card"><h2>Grade da OF${aberta && o.itens.length > 1 ? '<span class="dir"><button id="btKit">Consolidação de kit</button></span>' : ""}</h2>${tabela([
-          {t: "SKU", f: i => `<b>${esc(i.sku)}</b>`}, {t: "Descrição", k: "descricao"}, {t: "Cor", k: "cor"}, {t: "Tam.", k: "tamanho"},
-          {t: "GTIN", k: "gtin", cl: "mono"}, {t: "Qtd", k: "quantidade", n: 1}, {t: "Impressas", k: "impressas", n: 1}, {t: "Gravadas", k: "gravadas", n: 1},
-          {t: "Lidas", n: 1, f: i => `<b style="color:${i.lidas === i.quantidade ? "var(--sucesso)" : i.lidas > 0 ? "var(--alerta)" : "inherit"}">${i.lidas}</b>`},
-          {t: "", f: i => progresso(i.lidas, i.quantidade)}], o.itens)}</div>
-        <div class="card"><h2>Etiquetas<span class="dir">${aberta ? '<button id="btReimp">Reimprimir selecionadas</button>' : ""}</span></h2><div id="etqs"></div></div>
+        <div class="card"><h2>Grade da OF${aberta && o.itens.length > 1 ? '<span class="dir"><button id="btKit">Consolidação de kit</button></span>' : ""}</h2><div id="ofGrade"></div></div>
+        <div class="card"><h2>Etiquetas</h2><div id="etqs"></div></div>
         ${aberta ? `<div class="botoes"><button class="suc" id="btFinalizar">✔ Finalizar OF (entrada das lidas)</button>
           <button class="perigo" id="btCancelar">Cancelar OF</button></div>` : ""}`;
-      const etqs = await get(`/api/ordens/${id}/etiquetas`);
-      $("#etqs").innerHTML = tabela([{t: aberta ? '<input type="checkbox" id="todas">' : "", f: t => aberta && t.status === "EMITIDA" ? `<input type="checkbox" class="sel" value="${t.epc}">` : ""},
-        {t: "EPC", k: "epc", cl: "mono"}, {t: "Produto", f: t => `${esc(t.sku)} <span class="fraco">${esc(variante(t))}</span>`}, {t: "Série", k: "serial", n: 1},
-        {t: "Impressa", f: t => t.impressa_em ? "✔" : ""}, {t: "Gravada", f: t => t.gravada_em ? "✔" : ""}, {t: "Lida", f: t => t.lida ? "✔" : ""},
-        {t: "Situação", f: t => selo(t.status)}], etqs, {alt: "45vh", clic: 1});
-      ligarLinhas($("#etqs"), etqs, t => mostrarEtiqueta(t.epc));
+      listaSel($("#ofGrade"), [{t: "SKU", f: i => `<b>${esc(i.sku)}</b>`, csv: i => i.sku}, {t: "Descrição", k: "descricao"}, {t: "Cor", k: "cor"}, {t: "Tam.", k: "tamanho"},
+          {t: "GTIN", k: "gtin", cl: "mono"}, {t: "Qtd", k: "quantidade", n: 1}, {t: "Impressas", k: "impressas", n: 1}, {t: "Gravadas", k: "gravadas", n: 1},
+          {t: "Lidas", n: 1, f: i => `<b style="color:${i.lidas === i.quantidade ? "var(--sucesso)" : i.lidas > 0 ? "var(--alerta)" : "inherit"}">${i.lidas}</b>`, csv: i => i.lidas},
+          {t: "", f: i => progresso(i.lidas, i.quantidade)}], o.itens,
+        {sel: selGrade, nome: o.numero + "-grade",
+         acoes: aberta && impressoras.length ? [["🖨 Imprimir estes itens", "p", async l => {
+           const ids = new Set(l.map(i => i.produto_id));
+           const epcs = etqs.filter(t => ids.has(t.produto_id) && t.status === "EMITIDA" && !t.impressa_em).map(t => t.epc);
+           if (!epcs.length) return avisar("As etiquetas destes itens já foram impressas (use Reimprimir nas etiquetas)", "info");
+           const r = await post(`/api/ordens/${id}/imprimir`, {impressora_id: +$("#oImp").value, epcs}); avisar(`${r.impressas} etiqueta(s) enviadas`); desenhar(); }]] : []});
+      listaSel($("#etqs"), [{t: "EPC", k: "epc", cl: "mono"}, {t: "Produto", f: t => `${esc(t.sku)} <span class="fraco">${esc(variante(t))}</span>`, csv: t => t.sku},
+        {t: "Série", k: "serial", n: 1}, {t: "Impressa", f: t => t.impressa_em ? "✔" : "", csv: t => t.impressa_em || ""},
+        {t: "Gravada", f: t => t.gravada_em ? "✔" : "", csv: t => t.gravada_em || ""}, {t: "Lida", f: t => t.lida ? "✔" : "", csv: t => t.lida ? "sim" : ""},
+        {t: "Situação", f: t => selo(t.status), csv: t => t.status}], etqs,
+        {sel: selEtqs, chave: t => t.epc, alt: "45vh", nome: o.numero + "-etiquetas", aoClicar: t => mostrarEtiqueta(t.epc),
+         acoes: aberta ? [
+           ...(impressoras.length ? [["🖨 Reimprimir", "", async l => {
+             const epcs = l.filter(t => t.status === "EMITIDA").map(t => t.epc);
+             if (!epcs.length) return avisar("Só etiqueta emitida (ainda não usada) é reimpressa", "info");
+             const r = await post(`/api/ordens/${id}/imprimir`, {impressora_id: +$("#oImp").value, epcs}); avisar(`${r.impressas} reimpressa(s)`); desenhar(); }]] : []),
+           ["✔ Marcar como lidas", "", async l => { const r = await post(`/api/ordens/${id}/leituras`, {epcs: l.map(t => t.epc)});
+             const ruins = r.leituras.filter(x => !x.ok); avisar(`${r.leituras.length - ruins.length} marcada(s) como lidas` + (ruins.length ? `\n${ruins.length} recusada(s)` : ""), ruins.length ? "erro" : "ok"); desenhar(); }],
+           ["✖ Desmarcar leitura", "", async l => emLote(l.filter(t => t.lida), "Leituras removidas", t => del(`/api/ordens/${id}/leituras/${t.epc}`), desenhar)],
+           acoesEtiquetas(desenhar, ["cancelar"])[0]] : acoesEtiquetas(desenhar, ["transferencia", "baixa"])});
       if (!aberta) return;
-      $("#todas").onchange = e => $$(".sel").forEach(c => c.checked = e.target.checked);
       $("#btImprimir").onclick = () => tentar(async () => {
         const r = await post(`/api/ordens/${id}/imprimir`, {impressora_id: +$("#oImp").value}); avisar(`${r.impressas} etiqueta(s) enviadas para a impressora`); desenhar(); });
-      $("#btReimp").onclick = () => tentar(async () => {
-        const epcs = $$(".sel:checked").map(c => c.value); if (!epcs.length) return avisar("Marque as etiquetas", "info");
-        const r = await post(`/api/ordens/${id}/imprimir`, {impressora_id: +$("#oImp").value, epcs}); avisar(`${r.impressas} reimpressa(s)`); desenhar(); });
       $("#btZpl").onclick = () => baixar(`/api/ordens/${id}/etiquetas.zpl`);
       $("#btCsv").onclick = () => baixar(`/api/ordens/${id}/etiquetas.csv`);
       $("#btLimpar").onclick = () => tentar(async () => { if (!confirm("Zerar as leituras desta OF?")) return; await del(`/api/ordens/${id}/leituras`); Leitor.esquecer(); desenhar(); });
@@ -332,25 +365,25 @@ PAGINAS.estacao = {
             <button class="p" id="btGravar">Gravar</button><div id="gRes" class="fraco"></div></div>
           <div class="acao"><h4>🚫 Cancelar etiquetas</h4><button class="perigo" data-a="cancelar">Cancelar marcadas</button></div>
         </div></div></div>`;
+    const selEst = new Set();   // etiqueta lida entra já marcada
+    const tirar = epcs => { epcs.forEach(e => { lidas.delete(e); selEst.delete(e); }); post("/api/remoto/remover", {epcs}).catch(() => {}); desenhar(); };
     const desenhar = () => {
       const lista = [...lidas.values()];
       $("#nLidas").textContent = lista.length;
-      $("#lidas").innerHTML = tabela([{t: '<input type="checkbox" id="todas" checked>', f: t => `<input type="checkbox" class="sel" value="${t.epc}" ${t._sel !== false ? "checked" : ""}>`},
-        {t: "EPC", k: "epc", cl: "mono"}, {t: "Produto", f: descProduto}, {t: "Situação", f: t => selo(t.status)}, {t: "Local", k: "local"},
-        {t: "", f: t => `<button class="link" data-x="${t.epc}">✕</button>`}], lista, {alt: "60vh", clic: 1, vazio: "Nenhuma etiqueta lida"});
-      ligarLinhas($("#lidas"), lista, t => mostrarEtiqueta(t.epc));
-      $("#todas")?.addEventListener("change", e => { $$(".sel").forEach(c => c.checked = e.target.checked); lista.forEach(t => t._sel = e.target.checked); });
-      $$(".sel").forEach(c => c.onchange = () => lidas.get(c.value)._sel = c.checked);
-      $$("[data-x]").forEach(b => b.onclick = () => { lidas.delete(b.dataset.x); post("/api/remoto/remover", {epcs: [b.dataset.x]}).catch(() => {}); desenhar(); });
+      listaSel($("#lidas"), [{t: "EPC", k: "epc", cl: "mono"}, {t: "Produto", f: descProduto}, {t: "Situação", f: t => selo(t.status), csv: t => t.status || "NAO CADASTRADA"},
+        {t: "Local", k: "local"}, {t: "", f: t => `<button class="link" data-x="${t.epc}">✕</button>`}], lista,
+        {sel: selEst, chave: t => t.epc, alt: "60vh", vazio: "Nenhuma etiqueta lida", nome: "etiquetas-lidas", aoClicar: t => mostrarEtiqueta(t.epc),
+         acoes: [["✕ Tirar da lista", "", async l => tirar(l.map(t => t.epc))]]});
+      $$("[data-x]").forEach(b => b.onclick = () => tirar([b.dataset.x]));
     };
     const atualizarSituacao = async epcs => {
       if (!epcs.length) return;
-      for (const s of await post("/api/etiquetas/situacao", {epcs})) lidas.set(s.epc, {...s, _sel: lidas.get(s.epc)?._sel});
+      for (const s of await post("/api/etiquetas/situacao", {epcs})) { if (!lidas.has(s.epc)) selEst.add(s.epc); lidas.set(s.epc, s); }
       desenhar();
     };
     definirSaida(epcs => tentar(() => atualizarSituacao(epcs)));
-    const marcadas = () => [...lidas.values()].filter(t => t._sel !== false).map(t => t.epc);
-    $("#btLimparLista").onclick = () => { lidas.clear(); Leitor.comando("limpar").catch(() => {}); Leitor.vistas.clear(); desenhar(); };
+    const marcadas = () => [...lidas.keys()].filter(e => selEst.has(e));
+    $("#btLimparLista").onclick = () => { lidas.clear(); selEst.clear(); Leitor.comando("limpar").catch(() => {}); Leitor.vistas.clear(); desenhar(); };
     const resultado = async (r, nome) => {
       avisar(`${nome}: ${r.quantidade} ok` + (r.erros.length ? `\n${r.erros.length} recusada(s): ` + r.erros.slice(0, 3).map(x => x.motivo).join("; ") : ""), r.erros.length ? "erro" : "ok");
       await atualizarSituacao([...lidas.keys()]);
@@ -406,10 +439,16 @@ PAGINAS.pedidos = {
         <option value="FINALIZADO">Finalizados</option><option value="CANCELADO">Cancelados</option></select><button class="p" id="btNovo">+ Novo pedido</button></span></h2><div id="lista"></div></div>`;
     const carregar = async () => {
       const lista = await get("/api/pedidos?status=" + $("#fSt").value);
-      $("#lista").innerHTML = tabela([{t: "Pedido", f: p => `<b>${esc(p.numero)}</b>`}, {t: "Tipo", k: "tipo"}, {t: "Cliente / destino", f: p => esc(p.tipo === "VENDA" ? p.cliente : "→ " + p.destino)},
-        {t: "Sai de", k: "local"}, {t: "Conferência", f: p => `${progresso(p.lidas, p.quantidade)}<span class="fraco">${p.lidas}/${p.quantidade}</span>`},
-        {t: "Situação", f: p => selo(p.status)}, {t: "Criado", f: p => dataBR(p.criado_em)}], lista, {clic: 1, vazio: "Nenhum pedido"});
-      ligarLinhas($("#lista"), lista, p => ir("pedido/" + p.id));
+      listaSel($("#lista"), [{t: "Pedido", f: p => `<b>${esc(p.numero)}</b>`, csv: p => p.numero}, {t: "Tipo", k: "tipo"},
+        {t: "Cliente / destino", f: p => esc(p.tipo === "VENDA" ? p.cliente : "→ " + p.destino)},
+        {t: "Sai de", k: "local"}, {t: "Conferência", f: p => `${progresso(p.lidas, p.quantidade)}<span class="fraco">${p.lidas}/${p.quantidade}</span>`, csv: p => `${p.lidas}/${p.quantidade}`},
+        {t: "Situação", f: p => selo(p.status), csv: p => p.status}, {t: "Criado", f: p => dataBR(p.criado_em)}], lista,
+        {vazio: "Nenhum pedido", nome: "pedidos", aoClicar: p => ir("pedido/" + p.id),
+         acoes: [["🚫 Cancelar selecionados", "perigo", async l => {
+           const abertos = l.filter(p => p.status === "ABERTO");
+           if (!abertos.length) return avisar("Só pedido em conferência pode ser cancelado", "info");
+           if (!await confirmar("Cancelar pedidos", `Cancelar ${abertos.length} pedido(s)? Nenhuma peça é baixada.`)) return;
+           await emLote(abertos, "Pedidos cancelados", p => post(`/api/pedidos/${p.id}/cancelar`), carregar); }]]});
     };
     $("#fSt").onchange = () => tentar(carregar);
     $("#btNovo").onclick = () => novoPedido();
@@ -437,6 +476,7 @@ PAGINAS.pedido = {
   titulo: "Pedido",
   async abrir(el, id) {
     let p;
+    const selItens = new Set(), selLidas = new Set();
     const desenhar = async () => {
       p = await get("/api/pedidos/" + id);
       $("#titulo").textContent = "Pedido " + p.numero;
@@ -447,14 +487,22 @@ PAGINAS.pedido = {
           <div class="kpi"><div class="rot">Conferidas</div><div class="val">${p.lidas}</div>${progresso(p.lidas, p.quantidade)}</div>
           <div class="kpi"><div class="rot">Faltam</div><div class="val">${Math.max(0, p.quantidade - p.lidas)}</div></div></div>
         ${aberto ? `<div class="card"><h2>Conferir</h2><div class="fraco">Leia as peças (▶ Ler no topo, tela <b>Expedição</b> no coletor, ou leitor USB).</div>${campoCaptura("capPed")}<div id="recusas"></div></div>` : ""}
-        <div class="grade2"><div class="card"><h2>Itens</h2>${tabela([{t: "Produto", f: i => `<b>${esc(i.sku)}</b> ${esc(i.descricao)} <span class="fraco">${esc(variante(i))}</span>`},
-            {t: "Pedido", k: "quantidade", n: 1}, {t: "Conferido", k: "lidas", n: 1}, {t: "", f: i => progresso(i.lidas, i.quantidade)}], p.itens)}</div>
-          <div class="card"><h2>Peças conferidas</h2>${tabela([{t: "EPC", k: "epc", cl: "mono"}, {t: "Produto", f: t => `${esc(t.sku)} <span class="fraco">${esc(variante(t))}</span>`},
-            {t: "", f: t => aberto ? `<button class="link" data-x="${t.epc}">remover</button>` : ""}], p.leituras, {alt: "40vh"})}</div></div>
+        <div class="grade2"><div class="card"><h2>Itens</h2><div id="pdItens"></div></div>
+          <div class="card"><h2>Peças conferidas</h2><div id="pdLidas"></div></div></div>
         ${aberto ? `<div class="botoes"><button class="suc" id="btFin">✔ Finalizar ${p.tipo === "VENDA" ? "(baixar as conferidas)" : "(transferir as conferidas)"}</button>
           <button class="perigo" id="btCanc">Cancelar pedido</button></div>` : ""}`;
+      const remover = l => emLote(l, "Peças removidas da conferência", async t => { await del(`/api/pedidos/${id}/leituras/${t.epc}`); Leitor.vistas.delete(t.epc); }, desenhar);
+      listaSel($("#pdItens"), [{t: "SKU", f: i => `<b>${esc(i.sku)}</b>`, csv: i => i.sku}, {t: "Descrição", f: i => `${esc(i.descricao)} <span class="fraco">${esc(variante(i))}</span>`},
+          {t: "Pedido", k: "quantidade", n: 1}, {t: "Conferido", k: "lidas", n: 1}, {t: "", f: i => progresso(i.lidas, i.quantidade)}], p.itens,
+        {sel: selItens, nome: p.numero + "-itens", acoes: aberto ? [["✖ Tirar as peças conferidas destes itens", "", async l => {
+          const skus = new Set(l.map(i => i.sku));
+          await remover(p.leituras.filter(t => skus.has(t.sku))); }]] : []});
+      listaSel($("#pdLidas"), [{t: "EPC", k: "epc", cl: "mono"}, {t: "Produto", f: t => `${esc(t.sku)} <span class="fraco">${esc(variante(t))}</span>`, csv: t => t.sku},
+          {t: "", f: t => aberto ? `<button class="link" data-x="${t.epc}">remover</button>` : ""}], p.leituras,
+        {sel: selLidas, chave: t => t.epc, alt: "40vh", nome: p.numero + "-conferidas", aoClicar: t => mostrarEtiqueta(t.epc),
+         acoes: aberto ? [["✖ Remover selecionadas", "", remover]] : []});
       if (!aberto) return;
-      $$("[data-x]").forEach(b => b.onclick = () => tentar(async () => { await del(`/api/pedidos/${id}/leituras/${b.dataset.x}`); Leitor.vistas.delete(b.dataset.x); desenhar(); }));
+      $$("[data-x]").forEach(b => b.onclick = () => remover([{epc: b.dataset.x}]));
       $("#btFin").onclick = () => tentar(async () => {
         const falta = p.quantidade - p.lidas;
         if (!confirm(falta > 0 ? `Faltam ${falta} peça(s). Finalizar mesmo assim?` : "Finalizar o pedido?")) return;
@@ -486,19 +534,27 @@ PAGINAS.inventarios = {
     $("#btCriar").onclick = () => tentar(async () => {
       const r = await post("/api/inventarios", {nome: $("#iNome").value, local_id: +$("#iLocal").value || null, grupo: $("#iGrupo").value || null});
       ir("inventario/" + r.id); });
-    const lista = await get("/api/inventarios");
-    $("#lista").innerHTML = tabela([{t: "Inventário", f: i => `<b>${esc(i.nome)}</b>`}, {t: "Escopo", f: i => esc([i.local || "Todos os locais", i.grupo].filter(Boolean).join(" · "))},
-      {t: "Aberto", f: i => dataBR(i.aberto_em)}, {t: "Lidas", n: 1, f: i => num(i.status === "ABERTO" ? i.lidas_agora : i.lidas)},
-      {t: "Acuracidade", n: 1, f: i => i.esperado ? (100 * i.ok / i.esperado).toFixed(1) + "%" : "-"}, {t: "Situação", f: i => selo(i.status)}], lista,
-      {clic: 1, vazio: "Nenhum inventário"});
-    ligarLinhas($("#lista"), lista, i => ir("inventario/" + i.id));
+    const carregar = async () => {
+      const lista = await get("/api/inventarios");
+      listaSel($("#lista"), [{t: "Inventário", f: i => `<b>${esc(i.nome)}</b>`, csv: i => i.nome}, {t: "Escopo", f: i => esc([i.local || "Todos os locais", i.grupo].filter(Boolean).join(" · "))},
+        {t: "Aberto", f: i => dataBR(i.aberto_em)}, {t: "Lidas", n: 1, f: i => num(i.status === "ABERTO" ? i.lidas_agora : i.lidas), csv: i => i.status === "ABERTO" ? i.lidas_agora : i.lidas},
+        {t: "Acuracidade", n: 1, f: i => i.esperado ? (100 * i.ok / i.esperado).toFixed(1) + "%" : "-"}, {t: "Situação", f: i => selo(i.status), csv: i => i.status}], lista,
+        {vazio: "Nenhum inventário", nome: "inventarios", aoClicar: i => ir("inventario/" + i.id),
+         acoes: [["🚫 Cancelar selecionados", "perigo", async l => {
+           const abertos = l.filter(i => i.status === "ABERTO");
+           if (!abertos.length) return avisar("Só inventário aberto pode ser cancelado", "info");
+           if (!await confirmar("Cancelar inventários", `Cancelar ${abertos.length} inventário(s)? Nada é ajustado no estoque.`)) return;
+           await emLote(abertos, "Inventários cancelados", i => post(`/api/inventarios/${i.id}/cancelar`), carregar); }]]});
+    };
+    await carregar();
   },
 };
 
 PAGINAS.inventario = {
   titulo: "Inventário",
   async abrir(el, id) {
-    let filtro = "", inv;
+    let filtro = "", inv, filtroProdutos = null;
+    const selProd = new Set(), selEtqs = new Set();   // seleção continua na atualização automática (3 s)
     const desenhar = async () => {
       inv = await get("/api/inventarios/" + id);
       $("#titulo").textContent = "Inventário: " + inv.nome;
@@ -515,17 +571,31 @@ PAGINAS.inventario = {
           <div class="kpi"><div class="rot">Sobrando / outro local</div><div class="val" style="color:var(--alerta)">${num(c.SOBRA + c.OUTRO_LOCAL + c.BAIXADA + c.DESCONHECIDA)}</div></div>
           <div class="kpi"><div class="rot">Acuracidade</div><div class="val">${inv.acuracidade == null ? "-" : inv.acuracidade + "%"}</div></div></div>
         ${aberto ? `<div class="card"><h2>Ler peças</h2>${campoCaptura("capInv")}</div>` : ""}
-        <div class="grade2"><div class="card"><h2>Por produto</h2>${tabela([{t: "Produto", f: p => `<b>${esc(p.sku)}</b> ${esc(p.descricao)} <span class="fraco">${esc(variante(p))}</span>`},
-            {t: "Sistema", k: "esperado", n: 1}, {t: "Lido", k: "lido", n: 1},
-            {t: "Diferença", n: 1, f: p => `<b style="color:${p.diferenca < 0 ? "var(--perigo)" : p.diferenca > 0 ? "var(--alerta)" : "var(--sucesso)"}">${p.diferenca > 0 ? "+" : ""}${p.diferenca}</b>`}],
-            inv.produtos, {alt: "50vh"})}</div>
+        <div class="grade2"><div class="card"><h2>Por produto</h2><div id="ivProd"></div></div>
           <div class="card"><h2>Etiquetas</h2><div class="botoes" style="margin-bottom:8px">${chip("", "Todas", inv.etiquetas.length)}${chip("OK", "Ok", c.OK)}${chip("FALTA", "Faltando", c.FALTA)}
               ${chip("SOBRA", "Sobra", c.SOBRA)}${chip("OUTRO_LOCAL", "Outro local", c.OUTRO_LOCAL)}${chip("BAIXADA", "Baixada", c.BAIXADA)}${chip("DESCONHECIDA", "Desconhecida", c.DESCONHECIDA)}</div>
-            ${tabela([{t: "EPC", k: "epc", cl: "mono"}, {t: "Produto", f: descProduto}, {t: "Situação", f: t => selo(t.situacao)}, {t: "Local no sistema", k: "local"},
-              {t: "", f: t => aberto && t.situacao === "DESCONHECIDA" ? `<button class="link" data-inc="${t.epc}">incluir</button>` : ""}], lista.slice(0, 1500), {alt: "50vh", clic: 1})}</div></div>
+            <div id="ivEtqs"></div></div></div>
         ${aberto ? `<div class="botoes"><button class="suc" id="btFin">✔ Finalizar inventário</button><button id="btZerar">Zerar leituras</button><button class="perigo" id="btCanc">Cancelar</button></div>` : ""}`;
       $$("[data-f]").forEach(b => b.onclick = () => { filtro = b.dataset.f; desenhar(); });
-      ligarLinhas($$(".card").at(-1), lista.slice(0, 1500), t => mostrarEtiqueta(t.epc));
+      listaSel($("#ivProd"), [{t: "SKU", f: p => `<b>${esc(p.sku)}</b>`, csv: p => p.sku}, {t: "Descrição", f: p => `${esc(p.descricao)} <span class="fraco">${esc(variante(p))}</span>`},
+          {t: "Sistema", k: "esperado", n: 1}, {t: "Lido", k: "lido", n: 1},
+          {t: "Diferença", n: 1, f: p => `<b style="color:${p.diferenca < 0 ? "var(--perigo)" : p.diferenca > 0 ? "var(--alerta)" : "var(--sucesso)"}">${p.diferenca > 0 ? "+" : ""}${p.diferenca}</b>`, csv: p => p.diferenca}],
+        inv.produtos, {sel: selProd, chave: p => p.produto_id, alt: "50vh", nome: "inventario-" + id + "-produtos",
+          acoes: [["🔎 Ver só as etiquetas destes produtos", "", async l => { filtroProdutos = new Set(l.map(p => p.produto_id)); await desenhar(); }]]});
+      const visiveis = (filtroProdutos ? lista.filter(t => filtroProdutos.has(t.produto_id)) : lista).slice(0, 1500);
+      listaSel($("#ivEtqs"), [{t: "EPC", k: "epc", cl: "mono"}, {t: "Produto", f: descProduto}, {t: "Situação", f: t => selo(t.situacao), csv: t => t.situacao},
+          {t: "Local no sistema", k: "local"},
+          {t: "", f: t => aberto && t.situacao === "DESCONHECIDA" ? `<button class="link" data-inc="${t.epc}">incluir</button>` : ""}], visiveis,
+        {sel: selEtqs, chave: t => t.epc, alt: "50vh", nome: "inventario-" + id + "-etiquetas", aoClicar: t => mostrarEtiqueta(t.epc),
+         acoes: [filtroProdutos ? ["✖ Mostrar todos os produtos", "", async () => { filtroProdutos = null; await desenhar(); }] : null,
+                 aberto ? ["➕ Incluir desconhecidas no estoque", "", async l => {
+                   const desc = l.filter(t => t.situacao === "DESCONHECIDA");
+                   if (!desc.length) return avisar("Nenhuma etiqueta desconhecida selecionada", "info");
+                   const produtos = await get("/api/produtos?ativos=true");
+                   const pid = await escolher("Incluir no estoque", `${desc.length} etiqueta(s) desconhecida(s) viram peças do produto:`, "Produto",
+                     produtos.map(p => [p.id, `${p.sku} · ${p.descricao} ${variante(p)}`]), desc[0].sugerido?.id);
+                   if (pid === null) return;
+                   await emLote(desc, "Incluídas", t => post(`/api/inventarios/${id}/incluir`, {epc: t.epc, produto_id: +pid}), desenhar); }] : null]});
       if (!aberto) return;
       $$("[data-inc]").forEach(b => b.onclick = () => incluirDesconhecida(id, inv.etiquetas.find(t => t.epc === b.dataset.inc), desenhar));
       $("#btFin").onclick = () => abrirDlg("Finalizar inventário", `<p>Encontradas <b>${c.OK}</b> de <b>${inv.esperado}</b> (acuracidade ${inv.acuracidade ?? "-"}%).</p>
@@ -563,8 +633,14 @@ PAGINAS.antifurto = {
     const desenhar = () => {
       const lista = [...alarmes.values()];
       $("#nAl").textContent = lista.length;
-      $("#alarmes").innerHTML = tabela([{t: "Hora", k: "hora"}, {t: "EPC", k: "epc", cl: "mono"}, {t: "Produto", f: descProduto}, {t: "Local", k: "local"},
-        {t: "", f: t => `<button class="peq" data-ok="${t.epc}">Conferido</button>`}], lista, {vazio: "Nenhum alarme"});
+      listaSel($("#alarmes"), [{t: "Hora", k: "hora"}, {t: "EPC", k: "epc", cl: "mono"}, {t: "Produto", f: descProduto}, {t: "Local", k: "local"},
+        {t: "", f: t => `<button class="peq" data-ok="${t.epc}">Conferido</button>`}], lista,
+        {chave: t => t.epc, vazio: "Nenhum alarme", nome: "alarmes-antifurto", aoClicar: t => mostrarEtiqueta(t.epc),
+         acoes: [["✔ Conferido (tirar da lista)", "", async l => { l.forEach(t => alarmes.delete(t.epc)); desenhar(); }],
+                 ["📤 Baixar como venda", "perigo", async l => {
+                   if (!await confirmar("Baixar como venda", `${l.length} peça(s) passaram sem baixa. Registrar a venda agora?`)) return;
+                   const r = await post("/api/etiquetas/baixa", {epcs: l.map(t => t.epc), motivo: "VENDA", documento: "ANTIFURTO"});
+                   r.ok.forEach(e => alarmes.delete(e)); avisar(`${r.quantidade} baixada(s)`); desenhar(); }]]});
       $$("[data-ok]").forEach(b => b.onclick = () => { alarmes.delete(b.dataset.ok); desenhar(); });
     };
     definirSaida(epcs => tentar(async () => {
@@ -593,11 +669,15 @@ PAGINAS.movimentos = {
     const qs = () => new URLSearchParams({tipo: $("#mTipo").value, de: $("#mDe").value, ate: $("#mAte").value, local_id: $("#mLocal").value, q: $("#mQ").value});
     const carregar = async () => {
       const lista = await get("/api/movimentos?limite=1000&" + qs());
-      $("#lista").innerHTML = tabela([{t: "Data/hora", f: m => dataBR(m.data_hora)}, {t: "Tipo", k: "tipo"}, {t: "EPC", k: "epc", cl: "mono"},
-        {t: "Produto", f: m => `<b>${esc(m.sku)}</b> <span class="fraco">${esc(variante(m))}</span>`}, {t: "Qtd", n: 1, f: m => m.quantidade > 0 ? "+1" : m.quantidade < 0 ? "-1" : ""},
+      // O histórico não se apaga (kardex): a seleção serve para exportar e para agir nas etiquetas desses movimentos
+      const etiquetasDe = l => [...new Map(l.map(m => [m.epc, {epc: m.epc}])).values()];
+      listaSel($("#lista"), [{t: "Data/hora", f: m => dataBR(m.data_hora), csv: m => m.data_hora}, {t: "Tipo", k: "tipo"}, {t: "EPC", k: "epc", cl: "mono"},
+        {t: "Produto", f: m => `<b>${esc(m.sku)}</b> <span class="fraco">${esc(variante(m))}</span>`, csv: m => m.sku},
+        {t: "Qtd", n: 1, f: m => m.quantidade > 0 ? "+1" : m.quantidade < 0 ? "-1" : "", csv: m => m.quantidade},
         {t: "De → para", f: m => esc([m.origem_local, m.destino_local].filter(Boolean).join(" → "))}, {t: "Motivo", k: "motivo"}, {t: "Documento", k: "documento"},
-        {t: "Quem", f: m => esc([m.usuario, m.origem].filter(Boolean).join(" · "))}], lista, {clic: 1, alt: "68vh", vazio: "Nenhum movimento no período"});
-      ligarLinhas($("#lista"), lista, m => mostrarEtiqueta(m.epc));
+        {t: "Quem", f: m => esc([m.usuario, m.origem].filter(Boolean).join(" · "))}], lista,
+        {alt: "68vh", vazio: "Nenhum movimento no período", nome: "movimentos", aoClicar: m => mostrarEtiqueta(m.epc),
+         acoes: acoesEtiquetas(carregar, ["estorno", "transferencia", "baixa"]).map(([r, c, fn]) => [r + " (etiquetas)", c, l => fn(etiquetasDe(l))])});
     };
     $("#btFiltrar").onclick = () => tentar(carregar);
     $("#btCsv").onclick = () => baixar("/api/movimentos.csv?" + qs());
@@ -609,14 +689,22 @@ PAGINAS.movimentos = {
 PAGINAS.alertas = {
   titulo: "Alertas",
   async abrir(el) {
+    const selAlertas = new Set();
     const carregar = async () => {
       const todos = $("#aTodos")?.checked;
       const lista = await get("/api/alertas?todos=" + !!todos);
       el.innerHTML = `<div class="card"><h2>Alertas<span class="dir"><label class="check"><input type="checkbox" id="aTodos" ${todos ? "checked" : ""}> mostrar os lidos</label>
-          <button id="btLidos">Marcar todos como lidos</button></span></h2>${tabela([{t: "Data/hora", f: a => dataBR(a.data_hora)},
-          {t: "Tipo", f: a => `<span class="selo ${a.tipo === "ANTIFURTO" ? "erro" : "alerta"}">${esc(a.tipo.replace(/_/g, " ").toLowerCase())}</span>`},
-          {t: "Mensagem", k: "mensagem"}, {t: "EPC", f: a => a.epc ? `<button class="link mono" data-epc="${a.epc}">${esc(a.epc)}</button>` : ""},
-          {t: "", f: a => a.lido ? "" : `<button class="peq" data-lido="${a.id}">Lido</button>`}], lista, {vazio: "Nenhum alerta 🎉"})}</div>`;
+          <button id="btLidos">Marcar todos como lidos</button></span></h2><div id="alLista"></div></div>`;
+      const depois = async () => { atualizarBadge(); await carregar(); };
+      listaSel($("#alLista"), [{t: "Data/hora", f: a => dataBR(a.data_hora), csv: a => a.data_hora},
+          {t: "Tipo", f: a => `<span class="selo ${a.tipo === "ANTIFURTO" ? "erro" : "alerta"}">${esc(a.tipo.replace(/_/g, " ").toLowerCase())}</span>`, csv: a => a.tipo},
+          {t: "Mensagem", k: "mensagem"}, {t: "EPC", f: a => a.epc ? `<button class="link mono" data-epc="${a.epc}">${esc(a.epc)}</button>` : "", csv: a => a.epc || ""},
+          {t: "", f: a => a.lido ? "" : `<button class="peq" data-lido="${a.id}">Lido</button>`}], lista,
+        {sel: selAlertas, vazio: "Nenhum alerta 🎉", nome: "alertas", acoes: [
+          ["✔ Marcar como lidos", "", async l => { await post("/api/alertas/lidos", {ids: l.map(a => a.id)}); avisar(`${l.length} marcado(s) como lido(s)`); await depois(); }],
+          usuario.perfil === "ADMIN" ? ["🗑 Excluir", "perigo", async l => {
+            if (!await confirmar("Excluir alertas", `Excluir ${l.length} alerta(s)?`)) return;
+            await post("/api/alertas/excluir", {ids: l.map(a => a.id)}); avisar(`${l.length} excluído(s)`); await depois(); }] : null]});
       $("#aTodos").onchange = () => tentar(carregar);
       $("#btLidos").onclick = () => tentar(async () => { await post("/api/alertas/lidos"); atualizarBadge(); carregar(); });
       $$("[data-lido]").forEach(b => b.onclick = () => tentar(async () => { await post(`/api/alertas/${b.dataset.lido}/lido`); atualizarBadge(); carregar(); }));
@@ -630,18 +718,34 @@ PAGINAS.alertas = {
 PAGINAS.monitor = {
   titulo: "Monitor",
   async abrir(el) {
+    const selDisp = new Set(), selImp = new Set(), testes = {};
+    el.innerHTML = `<div class="card"><h2>Coletores</h2><div id="mnDisp"></div></div><div class="card"><h2>Impressoras</h2><div id="mnImp"></div></div>`;
+    const testar = async i => {
+      testes[i.id] = "testando…"; desenharImp();
+      try { testes[i.id] = "✔ " + (await post(`/api/impressoras/${i.id}/testar`)).mensagem; } catch (e) { testes[i.id] = "✖ " + e.message; }
+      desenharImp();
+    };
+    let imps = [];
+    const desenharImp = () => {
+      listaSel($("#mnImp"), [{t: "Impressora", f: i => `<b>${esc(i.nome)}</b>`, csv: i => i.nome},
+          {t: "Conexão", f: i => i.tipo === "REDE" ? esc(i.endereco + ":" + i.porta) : "Windows: " + esc(i.endereco)},
+          {t: "Teste", f: i => `<button class="peq" data-t="${i.id}">Testar conexão</button> <span class="fraco">${esc(testes[i.id] || "")}</span>`, csv: i => testes[i.id] || ""}], imps,
+        {sel: selImp, vazio: "Nenhuma impressora cadastrada", nome: "impressoras",
+         acoes: [["🔌 Testar selecionadas", "", async l => { for (const i of l) await testar(i); }]]});
+      $$("[data-t]", $("#mnImp")).forEach(b => b.onclick = () => testar(imps.find(i => i.id === +b.dataset.t)));
+    };
     const carregar = async () => {
-      const [disp, imps] = await Promise.all([get("/api/dispositivos"), get("/api/impressoras")]);
-      el.innerHTML = `<div class="card"><h2>Coletores</h2>${tabela([{t: "", f: d => `<span class="ponto ${d.online ? "on" : ""}"></span>`},
-          {t: "Coletor", f: d => `<b>${esc(d.nome || d.id)}</b><br><span class="fraco">${esc(d.id)}</span>`}, {t: "IP", k: "ip"}, {t: "Tela", k: "tela"},
-          {t: "RFID", k: "rfid"}, {t: "Bateria", n: 1, f: d => d.bateria == null ? "-" : d.bateria + "%"}, {t: "App", k: "versao"},
-          {t: "Último sinal", f: d => d.online ? "agora" : dataBR(d.ultimo_sinal)}], disp, {vazio: "Nenhum coletor conectou ainda"})}</div>
-        <div class="card"><h2>Impressoras</h2>${tabela([{t: "Impressora", f: i => `<b>${esc(i.nome)}</b>`}, {t: "Conexão", f: i => i.tipo === "REDE" ? esc(i.endereco + ":" + i.porta) : "Windows: " + esc(i.endereco)},
-          {t: "", f: i => `<button class="peq" data-t="${i.id}">Testar conexão</button> <span id="res${i.id}" class="fraco"></span>`}], imps, {vazio: "Nenhuma impressora cadastrada"})}</div>`;
-      $$("[data-t]").forEach(b => b.onclick = async () => {
-        const r = $("#res" + b.dataset.t); r.textContent = "testando…";
-        try { r.textContent = "✔ " + (await post(`/api/impressoras/${b.dataset.t}/testar`)).mensagem; } catch (e) { r.textContent = "✖ " + e.message; }
-      });
+      let disp;
+      [disp, imps] = await Promise.all([get("/api/dispositivos"), get("/api/impressoras")]);
+      listaSel($("#mnDisp"), [{t: "", f: d => `<span class="ponto ${d.online ? "on" : ""}"></span>`},
+          {t: "Coletor", f: d => `<b>${esc(d.nome || d.id)}</b><br><span class="fraco">${esc(d.id)}</span>`, csv: d => d.nome || d.id}, {t: "IP", k: "ip"}, {t: "Tela", k: "tela"},
+          {t: "RFID", k: "rfid"}, {t: "Bateria", n: 1, f: d => d.bateria == null ? "-" : d.bateria + "%", csv: d => d.bateria ?? ""}, {t: "App", k: "versao"},
+          {t: "Último sinal", f: d => d.online ? "agora" : dataBR(d.ultimo_sinal), csv: d => d.ultimo_sinal}], disp,
+        {sel: selDisp, vazio: "Nenhum coletor conectou ainda", nome: "coletores",
+         acoes: [usuario.perfil === "ADMIN" ? ["🗑 Tirar do monitor", "perigo", async l => {
+           if (!await confirmar("Tirar do monitor", `${l.length} coletor(es) saem da lista. Voltam sozinhos se falarem com o servidor de novo.`)) return;
+           await post("/api/dispositivos/excluir", {ids: l.map(d => d.id)}); avisar(`${l.length} coletor(es) removido(s)`); await carregar(); }] : null]});
+      desenharImp();
     };
     await carregar();
     aCada(10000, () => tentar(carregar));
@@ -654,49 +758,32 @@ PAGINAS.produtos = {
   async abrir(el) {
     const adm = usuario.perfil === "ADMIN";
     el.innerHTML = `<div class="card"><div class="filtros"><label>Buscar<input id="pQ" placeholder="SKU, descrição, GTIN, cor"></label>
-        ${adm ? '<button class="perigo" id="btExcluir" disabled>🗑 Excluir selecionados</button><span class="fraco" id="nSel"></span>' : ""}
         <span style="flex:1"></span><button id="btImp">⬆ Importar CSV</button><button onclick="baixar('/api/produtos.csv')">⬇ Exportar CSV</button>
         <button class="p" id="btNovo">+ Novo produto</button></div><div id="lista"></div></div>`;
-    const marcados = new Set();
-    let lista = [];
-    const contar = () => {
-      if (!adm) return;
-      $("#btExcluir").disabled = !marcados.size;
-      $("#nSel").textContent = marcados.size ? `${marcados.size} selecionado(s)` : "";
-      const todos = $("#pTodos");
-      if (todos) { const n = lista.filter(p => marcados.has(p.id)).length; todos.checked = n > 0 && n === lista.length; todos.indeterminate = n > 0 && n < lista.length; }
-    };
+    const ativo = (l, v) => emLote(l.filter(p => !!p.ativo !== v), v ? "Ativados" : "Desativados", p => put("/api/produtos/" + p.id, {...p, ativo: v}), carregar);
     const carregar = async () => {
-      lista = await get("/api/produtos?q=" + encodeURIComponent($("#pQ").value));
-      const ids = new Set(lista.map(p => p.id));
-      [...marcados].forEach(id => { if (!ids.has(id)) marcados.delete(id); });
-      $("#lista").innerHTML = tabela([
-        ...(adm ? [{t: '<input type="checkbox" id="pTodos" title="Selecionar todos">', f: p => `<input type="checkbox" class="pSel" value="${p.id}" ${marcados.has(p.id) ? "checked" : ""}>`}] : []),
-        {t: "SKU", f: p => `<b>${esc(p.sku)}</b>`}, {t: "Descrição", k: "descricao"}, {t: "Cor", k: "cor"}, {t: "Tam.", k: "tamanho"},
+      const lista = await get("/api/produtos?q=" + encodeURIComponent($("#pQ").value));
+      listaSel($("#lista"), [
+        {t: "SKU", f: p => `<b>${esc(p.sku)}</b>`, csv: p => p.sku}, {t: "Descrição", k: "descricao"}, {t: "Cor", k: "cor"}, {t: "Tam.", k: "tamanho"},
         {t: "Grupo", f: p => esc([p.grupo, p.subgrupo].filter(Boolean).join(" / "))}, {t: "GTIN / EAN", k: "gtin", cl: "mono"},
-        {t: "Preço", n: 1, f: p => p.preco ? moeda(p.preco) : ""}, {t: "Mín.", k: "estoque_min", n: 1}, {t: "Saldo", k: "saldo", n: 1},
-        {t: "", f: p => p.ativo ? "" : '<span class="selo">inativo</span>'}], lista, {clic: 1, alt: "70vh", vazio: "Nenhum produto cadastrado"});
-      ligarLinhas($("#lista"), lista, p => editarProduto(p, carregar));
-      if (adm) {
-        $$(".pSel").forEach(c => c.onchange = () => { c.checked ? marcados.add(+c.value) : marcados.delete(+c.value); contar(); });
-        $("#pTodos")?.addEventListener("change", e => {
-          lista.forEach(p => e.target.checked ? marcados.add(p.id) : marcados.delete(p.id));
-          $$(".pSel").forEach(c => c.checked = e.target.checked); contar();
-        });
-      }
-      contar();
+        {t: "Preço", n: 1, f: p => p.preco ? moeda(p.preco) : "", csv: p => String(p.preco).replace(".", ",")}, {t: "Mín.", k: "estoque_min", n: 1}, {t: "Saldo", k: "saldo", n: 1},
+        {t: "Ativo", f: p => p.ativo ? "" : '<span class="selo">inativo</span>', csv: p => p.ativo ? "sim" : "não"}], lista,
+        {alt: "70vh", vazio: "Nenhum produto cadastrado", nome: "produtos", aoClicar: p => editarProduto(p, carregar),
+         acoes: [
+           ["🖨 Gerar OF", "p", async l => {
+             const q = await escolher("Gerar OF", `${l.length} produto(s) selecionado(s).`, "Etiquetas de cada produto", null, "1");
+             const n = parseInt(q); if (q === null || !(n > 0)) return;
+             const o = await post("/api/ordens", {itens: l.filter(p => p.ativo).map(p => ({produto_id: p.id, quantidade: n}))});
+             avisar(`${o.numero}: ${o.quantidade} etiqueta(s)`); ir("ordem/" + o.id); }],
+           ["✔ Ativar", "", l => ativo(l, true)], ["⏸ Desativar", "", l => ativo(l, false)],
+           adm ? ["🗑 Excluir", "perigo", async l => {
+             const nomes = l.slice(0, 8).map(p => p.sku).join(", ") + (l.length > 8 ? ` e mais ${l.length - 8}` : "");
+             if (!await confirmar("Excluir produtos", `Excluir ${l.length} produto(s)?<br><b>${esc(nomes)}</b><br>Produto que já tem etiquetas não é excluído (desative em vez disso).`)) return;
+             const r = await post("/api/produtos/excluir", {ids: l.map(p => p.id)});
+             avisar(`${r.excluidos} produto(s) excluído(s)` + (r.mantidos.length ? `\n${r.mantidos.length} mantido(s) porque já têm etiquetas: ${r.mantidos.slice(0, 5).join(", ")}${r.mantidos.length > 5 ? "…" : ""}` : ""),
+                    r.mantidos.length ? "info" : "ok", r.mantidos.length ? 9000 : 3800);
+             await carregar(); }] : null]});
     };
-    if (adm) $("#btExcluir").onclick = () => tentar(async () => {
-      const sel = lista.filter(p => marcados.has(p.id));
-      if (!sel.length) return;
-      const nomes = sel.slice(0, 8).map(p => p.sku).join(", ") + (sel.length > 8 ? ` e mais ${sel.length - 8}` : "");
-      if (!confirm(`Excluir ${sel.length} produto(s)?\n${nomes}\n\nProduto que já tem etiquetas não é excluído (desative em vez disso).`)) return;
-      const r = await post("/api/produtos/excluir", {ids: sel.map(p => p.id)});
-      marcados.clear();
-      avisar(`${r.excluidos} produto(s) excluído(s)` + (r.mantidos.length ? `\n${r.mantidos.length} mantido(s) porque já têm etiquetas: ${r.mantidos.slice(0, 5).join(", ")}${r.mantidos.length > 5 ? "…" : ""}` : ""),
-             r.mantidos.length ? "info" : "ok", r.mantidos.length ? 9000 : 3800);
-      await carregar();
-    });
     let t; $("#pQ").oninput = () => { clearTimeout(t); t = setTimeout(() => tentar(carregar), 300); };
     $("#btNovo").onclick = () => editarProduto(null, carregar);
     $("#btImp").onclick = () => abrirDlg("Importar produtos (CSV)", `<div class="dica">Primeira linha com os nomes das colunas (separador <b>;</b>):<br>
@@ -733,10 +820,21 @@ PAGINAS.locais = {
   titulo: "Locais de estoque",
   async abrir(el) {
     LOCAIS = await get("/api/locais");
-    el.innerHTML = `<div class="card"><h2>Locais<span class="dir"><button class="p" id="btNovo">+ Novo local</button></span></h2>${tabela([
-      {t: "Código", f: l => `<b>${esc(l.codigo)}</b>`}, {t: "Nome", k: "nome"}, {t: "Tipo", k: "tipo"}, {t: "Peças", k: "quantidade", n: 1},
-      {t: "", f: l => (String(l.id) === String(CFG.local_padrao) ? '<span class="selo ok">padrão</span> ' : "") + (l.ativo ? "" : '<span class="selo">inativo</span>')}],
-      LOCAIS, {clic: 1})}</div>`;
+    const adm = usuario.perfil === "ADMIN";
+    el.innerHTML = `<div class="card"><h2>Locais<span class="dir"><button class="p" id="btNovo">+ Novo local</button></span></h2><div id="lcLista"></div></div>`;
+    const salvarAtivo = (l, v) => emLote(l.filter(x => !!x.ativo !== v), v ? "Ativados" : "Inativados",
+      x => put("/api/locais/" + x.id, {codigo: x.codigo, nome: x.nome, tipo: x.tipo, ativo: v}), async () => { await carregarBase(); ir("locais"); });
+    listaSel($("#lcLista"), [
+      {t: "Código", f: l => `<b>${esc(l.codigo)}</b>`, csv: l => l.codigo}, {t: "Nome", k: "nome"}, {t: "Tipo", k: "tipo"}, {t: "Peças", k: "quantidade", n: 1},
+      {t: "", f: l => (String(l.id) === String(CFG.local_padrao) ? '<span class="selo ok">padrão</span> ' : "") + (l.ativo ? "" : '<span class="selo">inativo</span>'),
+       csv: l => l.ativo ? "ativo" : "inativo"}],
+      LOCAIS, {nome: "locais", aoClicar: l => editar(l), acoes: adm ? [
+        ["✔ Ativar", "", l => salvarAtivo(l, true)], ["⏸ Inativar", "", l => salvarAtivo(l, false)],
+        ["🗑 Excluir", "perigo", async l => {
+          if (!await confirmar("Excluir locais", `Excluir ${l.length} local(is)? Local já usado (peças, histórico, OF, pedido ou inventário) ou o local padrão não é excluído — inative.`)) return;
+          const r = await post("/api/locais/excluir", {ids: l.map(x => x.id)});
+          avisar(`${r.excluidos} excluído(s)` + (r.mantidos.length ? `\n${r.mantidos.length} mantido(s) porque já foram usados: ${r.mantidos.join(", ")}` : ""), r.mantidos.length ? "info" : "ok", 8000);
+          await carregarBase(); ir("locais"); }]] : []});
     const editar = l => {
       l = l || {tipo: "DEPOSITO", ativo: 1};
       abrirDlg(l.id ? "Local " + l.codigo : "Novo local", `<div class="form"><label>Código<input id="lc" value="${esc(l.codigo || "")}"></label>
@@ -748,7 +846,6 @@ PAGINAS.locais = {
           fecharDlg(); await carregarBase(); ir("locais"); }]]);
     };
     $("#btNovo").onclick = () => editar();
-    ligarLinhas(el, LOCAIS, editar);
   },
 };
 
@@ -759,9 +856,16 @@ PAGINAS.impressoras = {
     const lista = await get("/api/impressoras");
     el.innerHTML = `<div class="dica">Impressoras Zebra RFID (ZD621R, ZT411 RFID, ZT231R…) em ZPL. <b>Rede</b>: IP da impressora, porta 9100.
         <b>Windows</b>: impressora USB instalada com o driver ZDesigner (o sistema manda o ZPL direto, em modo RAW). O layout da etiqueta fica em Configurações.</div>
-      <div class="card"><h2>Impressoras<span class="dir"><button class="p" id="btNova">+ Nova impressora</button></span></h2>${tabela([
-        {t: "Nome", f: i => `<b>${esc(i.nome)}</b>`}, {t: "Conexão", f: i => i.tipo === "REDE" ? "Rede · " + esc(i.endereco + ":" + i.porta) : "Windows · " + esc(i.endereco)},
-        {t: "", f: i => `<button class="peq" data-teste="${i.id}">Etiqueta de teste</button> ${i.ativo ? "" : '<span class="selo">inativa</span>'}`}], lista, {clic: 1, vazio: "Nenhuma impressora"})}</div>`;
+      <div class="card"><h2>Impressoras<span class="dir"><button class="p" id="btNova">+ Nova impressora</button></span></h2><div id="imLista"></div></div>`;
+    const teste = i => post(`/api/impressoras/${i.id}/etiqueta-teste`);
+    listaSel($("#imLista"), [
+      {t: "Nome", f: i => `<b>${esc(i.nome)}</b>`, csv: i => i.nome}, {t: "Conexão", f: i => i.tipo === "REDE" ? "Rede · " + esc(i.endereco + ":" + i.porta) : "Windows · " + esc(i.endereco)},
+      {t: "", f: i => `<button class="peq" data-teste="${i.id}">Etiqueta de teste</button> ${i.ativo ? "" : '<span class="selo">inativa</span>'}`, csv: i => i.ativo ? "ativa" : "inativa"}],
+      lista, {vazio: "Nenhuma impressora", nome: "impressoras", aoClicar: i => editar(i), acoes: [
+        ["🧾 Etiqueta de teste", "", l => emLote(l, "Etiquetas de teste enviadas", teste)],
+        usuario.perfil === "ADMIN" ? ["🗑 Excluir", "perigo", async l => {
+          if (!await confirmar("Excluir impressoras", `Excluir ${l.length} impressora(s)?`)) return;
+          await emLote(l, "Excluídas", i => del("/api/impressoras/" + i.id), async () => ir("impressoras")); }] : null]});
     const editar = async i => {
       i = i || {tipo: "REDE", porta: 9100, ativo: 1};
       const win = await get("/api/impressoras/windows").catch(() => []);
@@ -781,7 +885,6 @@ PAGINAS.impressoras = {
       $("#it").onchange = troca; troca();
     };
     $("#btNova").onclick = () => editar();
-    ligarLinhas(el, lista, editar);
     $$("[data-teste]").forEach(b => b.onclick = () => tentar(async () => { await post(`/api/impressoras/${b.dataset.teste}/etiqueta-teste`); avisar("Etiqueta de teste enviada (sem gravar RFID)"); }));
   },
 };
@@ -791,9 +894,7 @@ PAGINAS.usuarios = {
   titulo: "Usuários",
   async abrir(el) {
     const lista = await get("/api/usuarios");
-    el.innerHTML = `<div class="card"><h2>Usuários<span class="dir"><button class="p" id="btNovo">+ Novo usuário</button></span></h2>${tabela([
-      {t: "Login", f: u => `<b>${esc(u.login)}</b>`}, {t: "Nome", k: "nome"}, {t: "Perfil", k: "perfil"}, {t: "", f: u => u.ativo ? "" : '<span class="selo">inativo</span>'}],
-      lista, {clic: 1})}</div>
+    el.innerHTML = `<div class="card"><h2>Usuários<span class="dir"><button class="p" id="btNovo">+ Novo usuário</button></span></h2><div id="usLista"></div></div>
       <div class="card"><h2>Minha senha</h2><div class="filtros"><label>Senha atual<input type="password" id="sa"></label><label>Nova senha<input type="password" id="sn"></label>
         <button class="p" id="btSenha">Trocar</button></div></div>`;
     const editar = u => {
@@ -807,8 +908,19 @@ PAGINAS.usuarios = {
           if (u.id) await put("/api/usuarios/" + u.id, d); else await post("/api/usuarios", d);
           fecharDlg(); ir("usuarios"); }]]);
     };
+    const outros = l => l.filter(u => u.id !== usuario.id);
+    const ativo = (l, v) => emLote(outros(l).filter(u => !!u.ativo !== v), v ? "Ativados" : "Inativados",
+      u => put("/api/usuarios/" + u.id, {login: u.login, nome: u.nome, perfil: u.perfil, ativo: v}), async () => ir("usuarios"));
+    listaSel($("#usLista"), [{t: "Login", f: u => `<b>${esc(u.login)}</b>`, csv: u => u.login}, {t: "Nome", k: "nome"}, {t: "Perfil", k: "perfil"},
+      {t: "", f: u => (u.id === usuario.id ? '<span class="selo ok">você</span> ' : "") + (u.ativo ? "" : '<span class="selo">inativo</span>'), csv: u => u.ativo ? "ativo" : "inativo"}],
+      lista, {nome: "usuarios", aoClicar: u => editar(u), acoes: [
+        ["✔ Ativar", "", l => ativo(l, true)], ["⏸ Inativar", "", l => ativo(l, false)],
+        ["🗑 Excluir", "perigo", async l => {
+          const alvo = outros(l);
+          if (!alvo.length) return avisar("Você não pode excluir o seu próprio usuário", "info");
+          if (!await confirmar("Excluir usuários", `Excluir ${alvo.length} usuário(s): <b>${esc(alvo.map(u => u.login).join(", "))}</b>?<br>O histórico continua mostrando o login de quem fez cada movimento.`)) return;
+          await post("/api/usuarios/excluir", {ids: alvo.map(u => u.id)}); avisar(`${alvo.length} excluído(s)`); ir("usuarios"); }]]});
     $("#btNovo").onclick = () => editar();
-    ligarLinhas(el, lista, editar);
     $("#btSenha").onclick = () => tentar(async () => { await post("/api/minha-senha", {atual: $("#sa").value, nova: $("#sn").value}); avisar("Senha trocada"); $("#sa").value = $("#sn").value = ""; });
   },
 };

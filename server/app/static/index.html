@@ -115,6 +115,9 @@
   .captura { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
   .captura input { flex: 1; font-family: Consolas, monospace; }
   .oculto { display: none !important; }
+  .barra-sel { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 8px; min-height: 28px; }
+  .barra-sel .nsel { margin-right: 6px; min-width: 130px; }
+  .selTodos, .selLinha { width: 16px; height: 16px; cursor: pointer; accent-color: var(--primaria); }
   .lista-acoes { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
   .acao { border: 1px solid var(--borda); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
   .acao h4 { margin: 0; font-size: 14px; }
@@ -175,6 +178,12 @@
 <dialog id="dlg"><div class="cab"><h3 id="dlgTitulo"></h3><button class="link" onclick="$('#dlg').close()">✕</button></div>
   <div class="conteudo" id="dlgConteudo"></div><div class="pe" id="dlgPe"></div></dialog>
 
+<dialog id="dlgEscolha" style="width:min(420px,94vw)"><form method="dialog" id="formEscolha">
+  <div class="cab"><h3 id="escTitulo"></h3></div>
+  <div class="conteudo"><div id="escTexto" class="fraco" style="margin-bottom:8px"></div>
+    <label class="form" style="display:flex;flex-direction:column;gap:4px"><span id="escRotulo" class="fraco"></span><select id="escSelect"></select><input id="escInput"></label></div>
+  <div class="pe"><button type="button" id="escNao">Cancelar</button><button class="p" id="escSim" value="ok">Confirmar</button></div>
+</form></dialog>
 <script src="/static/pc-base.js"></script>
 <script src="/static/pc-paginas.js"></script>
 <script>iniciar();</script>

@@ -12,8 +12,8 @@ android {
         applicationId = "br.curso.tagstock"
         minSdk = 26          // MC3300R/MC3390R: Android 8.1 ou superior
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
     }
 
     // Chave fixa: cada versão nova instala por cima da anterior

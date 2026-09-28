@@ -134,6 +134,7 @@
   <button id="modo" title="O gatilho lê RFID ou código de barras (toque para trocar)" hidden>📡</button>
   <button id="teclado" title="Teclado">⌨</button>
   <button id="btConfig" title="Config">⚙</button>
+  <button id="btSair" title="Sair do app" hidden><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" style="display:block;margin:auto"><path d="M12 3v9"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/></svg></button>
 </header>
 <textarea id="leitura" class="captura" rows="1" inputmode="none" autocomplete="off" autocapitalize="characters" spellcheck="false" tabindex="-1" aria-hidden="true"></textarea>
 <main id="tela"></main>
@@ -462,6 +463,17 @@ window.addEventListener("hashchange", () => abrir(location.hash.slice(1)));
 $("voltar").addEventListener("click", () => { if (telaAtual !== "menu") location.hash = "menu"; });
 tela.addEventListener("click", (ev) => { const b = ev.target.closest("[data-acao]"); if (b) telas[telaAtual][b.dataset.acao]?.(b, b.dataset.valor); });
 $("btConfig").addEventListener("click", (ev) => { ev.stopPropagation(); location.hash = "config"; });
+// ⏻ Sair: fecha o app (no AppCenter volta para a grade de apps). O usuário continua logado.
+if (app?.fechar) {
+  $("btSair").hidden = false;
+  $("btSair").addEventListener("click", async (ev) => {
+    ev.stopPropagation();
+    if (await confirmar("Sair do TagStock", "Fechar o app? O leitor RFID é liberado para os outros apps.")) {
+      try { telas[telaAtual]?.sair?.(); } catch {}
+      app.fechar();
+    }
+  });
+}
 
 // ======================================================================= LOGIN
 telas.login = {

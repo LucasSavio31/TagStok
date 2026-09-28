@@ -59,6 +59,122 @@ function tabela(colunas, linhas, opts = {}) {
     colunas.map(c => `<td class="${c.n ? "n" : ""} ${c.cl || ""}">${c.f ? c.f(l, i) : esc(l[c.k])}</td>`).join("") + "</tr>").join("");
   return `<div class="tabela" style="${opts.alt ? "max-height:" + opts.alt : ""}"><table><thead><tr>${cab}</tr></thead><tbody>${corpo}</tbody></table></div>`;
 }
+// Lista com caixas de seleção: uma por linha + "selecionar todos" no cabeçalho, contador e ações em lote.
+//   el: onde desenhar · colunas/linhas: como em tabela() · opts:
+//     chave: l => id da linha (padrão l.id) · acoes: [[rótulo, classe, async selecionadas => {}], ...]
+//     marcavel: l => pode marcar? · aoClicar: l => {} (clique na linha) · nome: arquivo do CSV
+// A seleção fica guardada em el._sel e sobrevive quando a lista é redesenhada (ex.: atualização a cada 3 s).
+function listaSel(el, colunas, linhas, opts = {}) {
+  if (!el) return;
+  const chave = l => String((opts.chave || (x => x.id))(l));
+  const marcavel = opts.marcavel || (() => true);
+  const sel = opts.sel || el._sel || (el._sel = new Set());   // opts.sel: seleção guardada pela tela (página redesenhada inteira)
+  const existentes = new Set(linhas.filter(marcavel).map(chave));
+  [...sel].forEach(k => existentes.has(k) || sel.delete(k));
+  const acoes = (opts.acoes || []).filter(Boolean);
+  const cols = [{t: '<input type="checkbox" class="selTodos" title="Selecionar todos">',
+                 f: l => marcavel(l) ? `<input type="checkbox" class="selLinha" data-k="${esc(chave(l))}" ${sel.has(chave(l)) ? "checked" : ""}>` : ""},
+                ...colunas];
+  el.innerHTML = (linhas.length ? `<div class="barra-sel"><span class="nsel fraco"></span>
+      ${acoes.map((a, i) => `<button class="peq ${a[1] || ""}" data-acao-lote="${i}">${a[0]}</button>`).join("")}
+      <button class="peq" data-csv-lote>⬇ CSV das selecionadas</button></div>` : "") + tabela(cols, linhas, {...opts, clic: opts.clic ?? !!opts.aoClicar});
+  const escolhidas = () => linhas.filter(l => marcavel(l) && sel.has(chave(l)));
+  const atualizar = () => {
+    const n = escolhidas().length, total = existentes.size;
+    const nsel = $(".nsel", el); if (nsel) nsel.textContent = n ? `${n} selecionada(s)` : "Nenhuma selecionada";
+    $$("[data-acao-lote],[data-csv-lote]", el).forEach(b => b.disabled = !n);
+    const todos = $(".selTodos", el);
+    if (todos) { todos.checked = n > 0 && n === total; todos.indeterminate = n > 0 && n < total; todos.disabled = !total; }
+  };
+  $$(".selLinha", el).forEach(c => c.onchange = () => { c.checked ? sel.add(c.dataset.k) : sel.delete(c.dataset.k); atualizar(); });
+  const todos = $(".selTodos", el);
+  if (todos) todos.onchange = () => {
+    $$(".selLinha", el).forEach(c => { c.checked = todos.checked; todos.checked ? sel.add(c.dataset.k) : sel.delete(c.dataset.k); });
+    linhas.filter(marcavel).forEach(l => todos.checked ? sel.add(chave(l)) : sel.delete(chave(l)));   // inclui as que não couberam na tela
+    atualizar();
+  };
+  $$("[data-acao-lote]", el).forEach(b => b.onclick = async () => {
+    const lista = escolhidas(); if (!lista.length) return;
+    b.disabled = true;
+    try { await tentar(() => acoes[+b.dataset.acaoLote][2](lista)); } finally { atualizar(); }
+  });
+  const csv = $("[data-csv-lote]", el);
+  if (csv) csv.onclick = () => csvDasLinhas(opts.nome || "selecionadas", colunas, escolhidas());
+  if (opts.aoClicar) ligarLinhas(el, linhas, opts.aoClicar);
+  el.limparSelecao = () => { sel.clear(); atualizar(); };
+  atualizar();
+}
+// Pergunta rápida (funciona por cima de outro diálogo). opcoes: [[valor, rótulo], ...] = lista; null = campo de texto; false = só confirmar.
+// Devolve o valor escolhido, ou null se cancelou.
+function escolher(titulo, texto, rotulo, opcoes, padrao = "") {
+  return new Promise(ok => {
+    const d = $("#dlgEscolha");
+    $("#escTitulo").textContent = titulo; $("#escTexto").innerHTML = texto || ""; $("#escRotulo").textContent = rotulo || "";
+    const texto_ = opcoes === null;
+    $("#escSelect").classList.toggle("oculto", !opcoes); $("#escInput").classList.toggle("oculto", !texto_);
+    $("#escRotulo").classList.toggle("oculto", !rotulo);
+    if (opcoes) $("#escSelect").innerHTML = opcoes.map(([v, r]) => `<option value="${esc(v)}" ${String(v) === String(padrao) ? "selected" : ""}>${esc(r)}</option>`).join("");
+    else if (texto_) $("#escInput").value = padrao;
+    let resposta = null;
+    $("#escSim").onclick = e => { e.preventDefault(); resposta = opcoes ? $("#escSelect").value : texto_ ? $("#escInput").value : "ok"; d.close(); };
+    $("#escNao").onclick = () => d.close();
+    $("#formEscolha").onsubmit = e => { e.preventDefault(); $("#escSim").click(); };
+    d.onclose = () => ok(resposta);
+    d.showModal();
+    (opcoes ? $("#escSelect") : texto_ ? $("#escInput") : $("#escSim")).focus();
+  });
+}
+const confirmar = (titulo, texto) => escolher(titulo, texto, "", false).then(v => v !== null);
+const opcoesDeLocais = () => LOCAIS.filter(l => l.ativo).map(l => [l.id, `${l.codigo} · ${l.nome}`]);
+
+// Ações em lote para qualquer lista de etiquetas (linhas com .epc). depois(): recarrega a tela.
+function acoesEtiquetas(depois, quais = ["entrada", "baixa", "estorno", "transferencia", "cancelar"]) {
+  const epcs = l => l.map(t => t.epc);
+  const resultado = async (r, nome) => {
+    avisar(`${nome}: ${r.quantidade} ok` + (r.erros.length ? `\n${r.erros.length} recusada(s): ` +
+      [...new Set(r.erros.map(x => x.motivo))].slice(0, 3).join("; ") : ""), r.erros.length ? "erro" : "ok", r.erros.length ? 8000 : 3800);
+    await depois?.();
+  };
+  const A = {
+    entrada: ["📥 Dar entrada", "", async l => {
+      const lid = await escolher("Entrada", `${l.length} etiqueta(s) emitida(s) entram no estoque.`, "Local", opcoesDeLocais(), CFG.local_padrao);
+      if (lid !== null) await resultado(await post("/api/etiquetas/entrada", {epcs: epcs(l), local_id: +lid}), "Entrada"); }],
+    baixa: ["📤 Baixar", "perigo", async l => {
+      const m = await escolher("Baixar", `${l.length} peça(s) saem do estoque.`, "Motivo", MOTIVOS.map(x => [x, x]), "VENDA");
+      if (m !== null) await resultado(await post("/api/etiquetas/baixa", {epcs: epcs(l), motivo: m}), "Baixa"); }],
+    estorno: ["↩ Estornar baixa", "", async l => {
+      if (await confirmar("Estornar", `${l.length} peça(s) baixada(s) voltam ao estoque.`))
+        await resultado(await post("/api/etiquetas/estorno", {epcs: epcs(l)}), "Estorno"); }],
+    transferencia: ["🔁 Transferir", "", async l => {
+      const lid = await escolher("Transferir", `${l.length} peça(s).`, "Para o local", opcoesDeLocais());
+      if (lid !== null) await resultado(await post("/api/etiquetas/transferencia", {epcs: epcs(l), destino_id: +lid}), "Transferência"); }],
+    cancelar: ["🚫 Cancelar etiquetas", "perigo", async l => {
+      const m = await escolher("Cancelar etiquetas", `${l.length} etiqueta(s) ficam inutilizadas (as que estão no estoque saem dele).`, "Motivo", null, "");
+      if (m !== null) await resultado(await post("/api/etiquetas/cancelar", {epcs: epcs(l), motivo: m || null}), "Cancelar"); }],
+  };
+  return quais.map(q => A[q]);
+}
+// Faz uma ação para cada item selecionado (rotas de um item só) e resume o resultado.
+async function emLote(lista, nome, fazer, depois) {
+  let ok = 0; const erros = [];
+  for (const x of lista) { try { await fazer(x); ok++; } catch (e) { erros.push(e.message); } }
+  avisar(`${nome}: ${ok} ok` + (erros.length ? `\n${erros.length} com erro: ${[...new Set(erros)].slice(0, 3).join("; ")}` : ""), erros.length ? "erro" : "ok", erros.length ? 8000 : 3800);
+  await depois?.();
+}
+function textoCelula(c, l) {
+  if (c.csv) return c.csv(l);
+  if (c.k) return l[c.k] ?? "";
+  if (!c.f) return "";
+  const d = document.createElement("div"); d.innerHTML = c.f(l); return d.textContent.trim();
+}
+function csvDasLinhas(nome, colunas, linhas) {
+  const cols = colunas.filter(c => c.t && !/<input/.test(c.t));
+  const q = v => { const s = String(v ?? "").replace(/\s+/g, " ").trim(); return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const texto = "﻿" + [cols.map(c => q(c.t.replace(/<[^>]+>/g, ""))).join(";"), ...linhas.map(l => cols.map(c => q(textoCelula(c, l))).join(";"))].join("\r\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([texto], {type: "text/csv;charset=utf-8"}));
+  a.download = nome + ".csv"; document.body.append(a); a.click(); a.remove();
+}
 function ligarLinhas(el, linhas, fn) {
   $$("tr.clic", el).forEach(tr => tr.onclick = e => { if (e.target.closest("button,input,a,select")) return; fn(linhas[+tr.dataset.i]); });
 }

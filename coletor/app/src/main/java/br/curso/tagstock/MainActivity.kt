@@ -400,6 +400,10 @@ class MainActivity : Activity() {
             }
         }
 
+        /** Botão ⏻ da tela: fecha o app (solta o leitor RFID no onStop). No AppCenter, volta para a grade de apps. */
+        @JavascriptInterface
+        fun fechar() = runOnUiThread { finishAndRemoveTask() }
+
         /** Identificação do coletor para o Monitor do PC (modelo + número do aparelho). */
         @JavascriptInterface
         fun dispositivo(): String {

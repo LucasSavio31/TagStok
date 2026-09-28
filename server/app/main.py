@@ -939,10 +939,71 @@ def alerta_lido(aid: int, con: Con = Depends(conexao), _u=Logado):
     return {"ok": True}
 
 
+class IdsOpcionais(BaseModel):
+    ids: Optional[list[int]] = None
+
+
 @app.post("/api/alertas/lidos")
-def alertas_lidos(con: Con = Depends(conexao), _u=Logado):
-    con.execute("UPDATE alertas SET lido=1 WHERE lido=0")
+def alertas_lidos(d: Optional[IdsOpcionais] = None, con: Con = Depends(conexao), _u=Logado):
+    """Sem ids: todos. Com ids: só os selecionados."""
+    if d and d.ids:
+        con.executemany("UPDATE alertas SET lido=1 WHERE id=?", [(i,) for i in d.ids])
+    else:
+        con.execute("UPDATE alertas SET lido=1 WHERE lido=0")
     return {"ok": True}
+
+
+@app.post("/api/alertas/excluir")
+def alertas_excluir(d: Ids, con: Con = Depends(conexao), _u=Depends(admin)):
+    con.executemany("DELETE FROM alertas WHERE id=?", [(i,) for i in d.ids])
+    return {"excluidos": len(set(d.ids))}
+
+
+class Textos(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=5000)
+
+
+@app.post("/api/dispositivos/excluir")
+def dispositivos_excluir(d: Textos, con: Con = Depends(conexao), _u=Depends(admin)):
+    """Tira coletores do monitor (voltam a aparecer se falarem com o servidor de novo)."""
+    con.executemany("DELETE FROM dispositivos WHERE id=?", [(i,) for i in d.ids])
+    return {"excluidos": len(set(d.ids))}
+
+
+@app.post("/api/locais/excluir")
+def locais_excluir(d: Ids, con: Con = Depends(conexao), _u=Depends(admin)):
+    """Exclui locais nunca usados. Local com etiquetas, movimentos, OF, pedido ou inventário é mantido (inative)."""
+    padrao = regras.local_padrao(con)
+    excluidos, mantidos = 0, []
+    for lid in dict.fromkeys(d.ids):
+        l = con.execute("SELECT codigo FROM locais WHERE id=?", (lid,)).fetchone()
+        if not l:
+            continue
+        usado = lid == padrao or any(con.execute(sql, (lid,) * sql.count("?")).fetchone() for sql in (
+            "SELECT 1 FROM etiquetas WHERE local_id=?",
+            "SELECT 1 FROM movimentos WHERE local_origem=? OR local_destino=?",
+            "SELECT 1 FROM ordens WHERE local_id=?",
+            "SELECT 1 FROM pedidos WHERE local_id=? OR destino_id=?",
+            "SELECT 1 FROM inventarios WHERE local_id=?"))
+        if usado:
+            mantidos.append(l["codigo"])
+            continue
+        con.execute("DELETE FROM locais WHERE id=?", (lid,))
+        excluidos += 1
+    return {"excluidos": excluidos, "mantidos": mantidos}
+
+
+@app.post("/api/usuarios/excluir")
+def usuarios_excluir(d: Ids, con: Con = Depends(conexao), u: Usuario = Depends(admin)):
+    """O histórico guarda o login como texto, então excluir o usuário não apaga o que ele fez."""
+    if u.id in d.ids:
+        raise ErroRegra("Você não pode excluir o seu próprio usuário")
+    for uid in d.ids:
+        con.execute("DELETE FROM sessoes WHERE usuario_id=?", (uid,))
+        con.execute("DELETE FROM usuarios WHERE id=?", (uid,))
+    if not con.execute("SELECT 1 FROM usuarios WHERE perfil='ADMIN' AND ativo=1").fetchone():
+        raise ErroRegra("Precisa ficar pelo menos um administrador ativo")
+    return {"excluidos": len(set(d.ids))}
 
 
 class Sinal(BaseModel):
