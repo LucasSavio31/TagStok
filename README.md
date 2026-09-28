@@ -31,6 +31,15 @@ Além disso: **Vincular** (etiqueta com EPC qualquer vira uma peça), **Entrada*
 **Transferência**, **Rastreio** de cada etiqueta (histórico completo), **Alertas**, **Estação RFID** (o PC usa o
 coletor como leitor/gravador pela rede, ou um leitor USB que "digita" o EPC).
 
+## Etiquetas NFC (NTAG213/215/216)
+
+Além das etiquetas RFID UHF (lidas pelo gatilho, a metros), o app lê **etiquetas NFC** pela antena NFC do
+Android: basta **encostar** a etiqueta no coletor (1 a 4 cm, uma por vez), em qualquer tela. O UID da NTAG vira o
+identificador da peça, no formato de um EPC: `4E4643` ("NFC") + UID — ex.: UID `04A1B2C3D4E5F6` →
+`4E4643000004A1B2C3D4E5F6`. Assim a NTAG funciona em tudo (vincular, entrada, baixa, expedição, inventário,
+consulta). As telas mostram **NFC** e o UID; *Ler etiqueta* mostra o chip (NTAG213/215/216). NFC não é gravada nem
+localizada (quente/frio): isso é só para RFID.
+
 ## Ciclo da etiqueta
 
 ```
@@ -74,7 +83,7 @@ ou, no coletor: 5 toques + PIN 1234 → marcar **TagStock**.
 ```
 cd server
 pip install -r requirements-dev.txt
-pytest                      (13 testes: EPC, OF, kit, gravação, vincular/baixa/estorno, inventário, expedição, antifurto...)
+pytest                      (14 testes: EPC, OF, kit, gravação, vincular/baixa/estorno, inventário, expedição, antifurto...)
 python tagstock_servidor.py
 ```
 APK: `cd coletor && gradlew assembleDebug` (JDK 17, Android SDK 34, `app/libs/API3_LIB-release.aar` do Zebra RFID SDK).

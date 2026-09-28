@@ -3,6 +3,10 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- NFC: etiquetas NTAG213/215/216 (13,56 MHz), lidas pela antena NFC do Android -->
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
     <!-- O SDK RFID da Zebra usa Bluetooth internamente (Android 12+ pede esta permissão) -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <!-- Android 8/9 (MC3300R): salvar o arquivo da contagem na pasta Download -->

@@ -171,6 +171,13 @@ const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const num = (v) => Number(v ?? 0).toLocaleString("pt-BR");
 const dataBR = (d) => (d ? d.slice(8, 10) + "/" + d.slice(5, 7) + " " + d.slice(11, 16) : "-");
 const variante = (t) => [t.cor, t.tamanho].filter(Boolean).join(" / ");
+// Etiqueta NFC (NTAG): o app entrega "4E4643" + UID. Na tela aparece "NFC" e o UID.
+const PREFIXO_NFC = "4E4643";
+const ehNfc = (e) => String(e || "").startsWith(PREFIXO_NFC);
+const uidNfc = (e) => { const u = String(e).slice(PREFIXO_NFC.length).replace(/^0+/, ""); return u.length % 2 ? "0" + u : u; };
+const mostraEpc = (e) => ehNfc(e) ? `<span class="selo info">NFC</span> ${esc(uidNfc(e))}` : esc(e);
+const nfcInfo = new Map();   // id -> {uid, modelo, tecnologias} (vem do app a cada leitura)
+window.detalheNfc = (json) => { try { const d = JSON.parse(json); nfcInfo.set(d.id, d); } catch {} };
 const app = (() => { try { return window.ColetorApp || null; } catch { return null; } })();
 const LOCAL = location.protocol === "file:";          // tela de dentro do APK: sem servidor
 const TELAS_LOCAIS = ["menu", "ler", "gravarLivre", "config"];
@@ -558,7 +565,7 @@ telas.finalizarOF = {
       <div class="card"><h2>Grade</h2><ul class="lista">${o.itens.map((i) => `<li class="${i.lidas === i.quantidade ? "ok" : ""}"><div class="info">
           <b>${esc(i.sku)}</b> ${esc(variante(i))}${barra(i.lidas, i.quantidade)}</div><span class="qtd">${i.lidas}/${i.quantidade}</span></li>`).join("")}</ul></div>
       ${this.recusas.length ? `<div class="card"><h2>Recusadas</h2><ul class="lista">${this.recusas.slice(0, 20).map((r) =>
-          `<li class="erro"><div class="info"><div class="mono">${esc(r.epc)}</div>${esc(r.motivo)}</div></li>`).join("")}</ul></div>` : ""}
+          `<li class="erro"><div class="info"><div class="mono">${mostraEpc(r.epc)}</div>${esc(r.motivo)}</div></li>`).join("")}</ul></div>` : ""}
       <div class="botoes"><button class="b" data-acao="zerar">Zerar</button><button class="b sucesso" data-acao="finalizar">✔ Finalizar</button></div>`;
   },
   rfid(epc) { if (this.of) this.j.add(epc); else msg("Escolha a OF", "alerta"); },
@@ -634,7 +641,10 @@ telas.gravarOF = {
     msg("Gravando: mantenha o coletor encostado na etiqueta", "info", false);
     try { app.gravarEtiqueta(this.proxima.epc, cfg.potGravar || 30); } catch (e) { this.gravando = false; msg(e.message, "erro"); }
   },
-  rfid() { if (this.proxima && !this.gravando) this.gravar($("goBt")); },
+  rfid(epc) {
+    if (ehNfc(epc)) return msg("Etiqueta NFC não é gravada aqui: a gravação é das etiquetas RFID (UHF)", "alerta");
+    if (this.proxima && !this.gravando) this.gravar($("goBt"));
+  },
   async resultado(r) {
     this.gravando = false;
     if (!r.ok) { bipe("erro"); msg(r.mensagem, "erro", false); this.desenhar(); return; }
@@ -664,7 +674,7 @@ function telaOperacao(def) {
         ${lista.length ? "" : `<div class="dica">${def.dica}</div>`}
         <div class="card"><h2>${def.rotuloLista || "Lidas"} <span class="dir"><span class="contador" style="color:var(--sucesso)">${ok.length}</span>
           ${lista.length > ok.length ? `<span class="selo perigo">${lista.length - ok.length} recusada(s)</span>` : ""}</span></h2>
-          <ul class="lista">${lista.map((t) => `<li class="${t.ok ? "ok" : "erro"}"><div class="info">${nomeProduto(t)}<div class="mono fraco">${esc(t.epc)}</div>
+          <ul class="lista">${lista.map((t) => `<li class="${t.ok ? "ok" : "erro"}"><div class="info">${nomeProduto(t)}<div class="mono fraco">${mostraEpc(t.epc)}</div>
             ${t.ok ? (t.local ? `<span class="fraco">${esc(t.local)}</span> ` : "") + seloSit(t.status) : esc(t.motivo)}</div>
             <button class="x" data-acao="tirar" data-valor="${esc(t.epc)}">✕</button></li>`).join("")}</ul></div>
         <div class="botoes"><button class="b" data-acao="limpar">Limpar</button>
@@ -912,7 +922,7 @@ telas.antifurto = {
     tela.innerHTML = `<div class="card"><label class="campo"><span>Ponto</span><input id="afPonto" value="${esc(cfg.pontoAntifurto || "Saída")}" data-livre="1"></label>
         <div class="botoes"><button class="b ${this.continuo ? "perigo" : "primario"}" data-acao="alternar">${this.continuo ? "■ Parar vigilância" : "▶ Vigiar sem parar"}</button></div></div>
       ${lista.length ? `<div class="alarme">🚨 ${lista.length} peça(s) NÃO vendida(s)</div>` : '<div class="dica">Peça vendida passa em silêncio. Peça que ainda está <b>no estoque</b> dispara o alarme.</div>'}
-      <div class="card"><h2>Alarmes</h2><ul class="lista">${lista.map((t) => `<li class="erro"><div class="info">${nomeProduto(t)}<div class="mono fraco">${esc(t.epc)}</div>
+      <div class="card"><h2>Alarmes</h2><ul class="lista">${lista.map((t) => `<li class="erro"><div class="info">${nomeProduto(t)}<div class="mono fraco">${mostraEpc(t.epc)}</div>
           <span class="fraco">${esc(t.hora)} · ${esc(t.local || "")}</span></div><button class="b" style="flex:none;min-height:40px" data-acao="conferido" data-valor="${esc(t.epc)}">Conferido</button></li>`).join("")
           || '<li class="vazio">Nenhum alarme</li>'}</ul></div>`;
     $("afPonto").onchange = () => { cfg.pontoAntifurto = $("afPonto").value; salvarCfg(); };
@@ -947,7 +957,7 @@ telas.consulta = {
     try {
       const h = await api("GET", "/api/epc/" + epc), t = h.etiqueta, d = h.decodificado;
       bipe("ok");
-      $("csRes").innerHTML = `<div class="card"><div class="mono">${esc(epc)}</div><div class="fraco">${esc(d.esquema)}${d.gtin ? " · GTIN " + esc(d.gtin) + " · série " + esc(d.serial) : ""}</div></div>` +
+      $("csRes").innerHTML = `<div class="card"><div class="mono">${mostraEpc(epc)}</div><div class="fraco">${esc(d.esquema)}${d.gtin ? " · GTIN " + esc(d.gtin) + " · série " + esc(d.serial) : ""}</div></div>` +
         (t ? `<div class="card"><div class="produto">${esc(t.sku)} ${esc(variante(t))}</div><div>${esc(t.descricao)}</div>
             <div style="margin-top:6px">${seloSit(t.status)} <b>${esc(t.local || "")}</b>${t.ordem ? ` <span class="fraco">· ${esc(t.ordem)}</span>` : ""}</div></div>
           <div class="card"><h2>Histórico</h2><ul class="lista">${h.movimentos.slice(0, 12).map((m) => `<li><div class="info"><b>${esc(m.tipo)}</b>
@@ -990,7 +1000,7 @@ telas.localizar = {
         const f = $("lcBusca").value.trim().toUpperCase();
         $("lcLista").innerHTML = tags.filter((t) => !f || [t.sku, t.descricao, t.epc, t.cor, t.tamanho].some((v) => String(v || "").toUpperCase().includes(f))).slice(0, 80)
           .map((t) => `<li class="clicavel" data-acao="escolher" data-valor="${esc(t.epc)}"><div class="info"><b>${esc(t.sku)}</b> ${esc(variante(t))} <span class="fraco">${esc(t.local)}</span>
-            <div class="mono fraco">${esc(t.epc)}</div></div></li>`).join("") || '<li class="vazio">Nenhuma etiqueta</li>';
+            <div class="mono fraco">${mostraEpc(t.epc)}</div></div></li>`).join("") || '<li class="vazio">Nenhuma etiqueta</li>';
       };
       $("lcBusca").addEventListener("input", desenhar); desenhar();
     } catch (e) { msg(e.message, "erro"); }
@@ -1004,13 +1014,14 @@ telas.localizar = {
   async definir() {
     const epc = $("lcEpc").value.trim().toUpperCase();
     if (!/^[0-9A-F]{8,}$/.test(epc)) return msg("EPC inválido (hexadecimal)", "erro");
+    if (ehNfc(epc)) return msg("O Localizar (quente/frio) é só para etiqueta RFID. A NFC é lida encostando no coletor.", "alerta");
     if (!app) return msg("Localizar funciona no app do coletor", "alerta");
     this.alvo = epc; this.valor = 0;
     try { app.localizar(epc); } catch { return msg("Atualize o app TagStock", "erro"); }
     definirGatilho("rfid");
     let info = "etiqueta não cadastrada";
     try { const h = await api("GET", "/api/epc/" + epc); if (h.etiqueta) info = `${h.etiqueta.sku} ${variante(h.etiqueta)} · ${h.etiqueta.local || ""}`; } catch {}
-    $("lcCorpo").innerHTML = `<div class="card" style="text-align:center"><div class="mono">${esc(epc)}</div><div class="fraco">${esc(info)}</div>
+    $("lcCorpo").innerHTML = `<div class="card" style="text-align:center"><div class="mono">${mostraEpc(epc)}</div><div class="fraco">${esc(info)}</div>
         <div class="radar"><div class="radar-barra" id="lcBarra"></div></div><div class="contador" id="lcValor">—</div>
         <div id="lcTexto" class="fraco">Aperte e segure o gatilho e vá andando</div>
         <div class="botoes" style="margin-top:10px"><button class="b" data-acao="alternar" id="lcBotao">▶ Procurar sem o gatilho</button>
@@ -1062,7 +1073,7 @@ telas.ler = {
   abrir() {
     this.detalhes = new Map(); this.lidas = new Map();
     try { app?.detalharEtiquetas?.(true); } catch {}
-    tela.innerHTML = `<div class="card"><p class="fraco" style="margin:0"><b>Só verificação</b>: aperte o gatilho perto da etiqueta. Nada é gravado nem enviado.</p></div>
+    tela.innerHTML = `<div class="card"><p class="fraco" style="margin:0"><b>Só verificação</b>: aperte o gatilho perto da etiqueta RFID, ou encoste uma etiqueta NFC (NTAG) no coletor. Nada é gravado nem enviado.</p></div>
       <div class="card"><h2>Etiquetas lidas <span class="dir"><span class="contador" id="lrCont">0</span></span></h2><ul class="lista" id="lrLista"></ul>
         <div class="botoes" style="margin-top:8px"><button class="b" data-acao="limpar">Limpar</button></div></div>`;
     this.desenhar();
@@ -1076,10 +1087,18 @@ telas.ler = {
     if (!$("lrLista")) return;
     $("lrCont").textContent = this.lidas.size;
     $("lrLista").innerHTML = [...this.lidas].reverse().map(([epc, n]) => {
+      if (ehNfc(epc)) {
+        const i = nfcInfo.get(epc) || {}, uid = i.uid || uidNfc(epc);
+        return `<li><div class="info"><div style="font-size:16px;font-weight:700"><span class="selo info">NFC</span> <span class="mono">${esc(uid)}</span></div>
+          <div class="fraco">NFC 13,56 MHz · UID ${uid.length * 4} bits · lida ${n}x</div>
+          ${i.modelo ? `<div style="font-size:13px">Chip: <b>${esc(i.modelo)}</b></div>` : ""}
+          ${i.tecnologias ? `<div class="fraco" style="font-size:12px">${esc(i.tecnologias)}</div>` : ""}
+          <div class="mono fraco">Código no sistema ${esc(epc)}</div></div></li>`;
+      }
       const d = this.detalhes.get(epc), chip = chipDoTid(d?.tid);
       let gs1 = "";
       if (/^30/.test(epc) && epc.length === 24) gs1 = "SGTIN-96 (GS1)"; else if (/^35/.test(epc) && epc.length === 24) gs1 = "GID-96 (GS1)";
-      return `<li><div class="info"><div class="mono" style="font-size:16px;font-weight:700">${esc(epc)}</div>
+      return `<li><div class="info"><div class="mono" style="font-size:16px;font-weight:700">${mostraEpc(epc)}</div>
         <div class="fraco">${epc.length * 4} bits${gs1 ? " · " + gs1 : ""} · lida ${n}x</div>
         ${d ? `<div style="font-size:13px">${d.regiao ? esc(d.regiao) + " · " : ""}${esc(d.canais || "")}</div>` : ""}
         ${chip ? `<div style="font-size:13px">Chip: <b>${esc(chip.nome)}</b>${chip.epcMax !== undefined ? ` · EPC até ${chip.epcMax} bits · usuário ${chip.user} bits` : ""}</div>` : ""}
@@ -1104,7 +1123,7 @@ telas.gravarLivre = {
         <div class="botoes"><button class="b primario" data-acao="gravar" id="glBt">📝 Gravar</button></div></div><div id="glRes"></div>`;
   },
   codigo(c) { $("glEpc").value = c; $("glEpc").dataset.antes = c; bipe("ok"); },
-  rfid(c) { this.codigo(c); },
+  rfid(c) { if (ehNfc(c)) return msg("Etiqueta NFC não é gravada aqui: a gravação é das etiquetas RFID (UHF)", "alerta"); this.codigo(c); },
   gravar() {
     const v = $("glEpc").value.trim().toUpperCase();
     if (!/^[0-9A-F]{1,24}$/.test(v)) return msg("Até 24 caracteres, só 0-9 e A-F", "alerta");

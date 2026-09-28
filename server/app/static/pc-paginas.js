@@ -127,8 +127,9 @@ async function mostrarEtiqueta(epc) {
   const h = await get("/api/epc/" + encodeURIComponent(epc));
   const t = h.etiqueta, d = h.decodificado;
   const dec = d.esquema === "SGTIN-96" ? `SGTIN-96 · GTIN <b>${esc(d.gtin)}</b> · série ${esc(d.serial)} · filtro ${esc(d.filtro)}`
-            : d.esquema === "GID-96" ? `GID-96 · gerente ${esc(d.gerente)} · classe ${esc(d.classe)} · série ${esc(d.serial)}` : "Formato livre (não GS1)";
-  const html = `<div class="mono" style="font-size:15px;margin-bottom:4px">${esc(h.epc)}</div>
+            : d.esquema === "GID-96" ? `GID-96 · gerente ${esc(d.gerente)} · classe ${esc(d.classe)} · série ${esc(d.serial)}`
+            : d.esquema === "NFC" ? `Etiqueta <b>NFC</b> (NTAG, 13,56 MHz) · UID <b>${esc(d.uid)}</b>` : "Formato livre (não GS1)";
+  const html = `<div class="mono" style="font-size:15px;margin-bottom:4px">${epcHtml(h.epc)}</div>
     <div class="fraco" style="margin-bottom:12px">${dec}${d.uri ? "<br>" + esc(d.uri) : ""}</div>
     ${t ? `<div class="kpis" style="grid-template-columns:repeat(4,1fr)">
       <div class="kpi"><div class="rot">Produto</div><div><b>${esc(t.sku)}</b><br>${esc(t.descricao)}<br><span class="fraco">${esc(variante(t))}</span></div></div>

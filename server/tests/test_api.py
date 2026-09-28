@@ -48,6 +48,17 @@ def test_epc_vetor_gs1():
     assert epc.sgtin96("80614141123458", 6789, 7, 3) == "3074257BF7194E4000001A85"
 
 
+def test_etiqueta_nfc(c):
+    nfc = "4E4643000004A1B2C3D4E5F6"            # NTAG213 com UID 04A1B2C3D4E5F6, como o app entrega
+    d = epc.decodificar(nfc)
+    assert d.esquema == "NFC" and d.uid == "04A1B2C3D4E5F6"
+    p = produto(c, "NFC-1")
+    assert ok(c.post("/api/etiquetas/vincular", json={"epcs": [nfc], "produto_id": p}))["quantidade"] == 1
+    assert ok(c.post("/api/etiquetas/baixa", json={"epcs": [nfc], "motivo": "VENDA"}))["quantidade"] == 1
+    h = ok(c.get(f"/api/epc/{nfc}"))
+    assert h["decodificado"]["esquema"] == "NFC" and h["etiqueta"]["status"] == "BAIXADA"
+
+
 def test_gtin_invalido_recusado(c):
     erro(c.post("/api/produtos", json={"sku": "X", "descricao": "X", "gtin": "7891234567890"}), "GTIN")
 

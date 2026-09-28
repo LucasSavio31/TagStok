@@ -52,11 +52,15 @@ function opcoesLocais(sel, vazio) {
   return (vazio ? `<option value="">${esc(vazio)}</option>` : "") +
     LOCAIS.filter(l => l.ativo).map(l => `<option value="${l.id}" ${String(sel) === String(l.id) ? "selected" : ""}>${esc(l.codigo)} · ${esc(l.nome)}</option>`).join("");
 }
+// Etiqueta NFC (NTAG): o coletor entrega "4E4643" + UID. Nas listas aparece "NFC" e o UID.
+const ehNfc = e => String(e || "").startsWith("4E4643");
+const uidNfc = e => { const u = String(e).slice(6).replace(/^0+/, ""); return u.length % 2 ? "0" + u : u; };
+const epcHtml = e => ehNfc(e) ? `<span class="selo EMITIDA" title="${esc(e)}">NFC</span> ${esc(uidNfc(e))}` : esc(e);
 function tabela(colunas, linhas, opts = {}) {
   if (!linhas.length) return `<div class="vazio">${opts.vazio || "Nada para mostrar"}</div>`;
   const cab = colunas.map(c => `<th class="${c.n ? "n" : ""}">${c.t}</th>`).join("");
   const corpo = linhas.map((l, i) => `<tr class="${opts.clic ? "clic" : ""}" data-i="${i}">` +
-    colunas.map(c => `<td class="${c.n ? "n" : ""} ${c.cl || ""}">${c.f ? c.f(l, i) : esc(l[c.k])}</td>`).join("") + "</tr>").join("");
+    colunas.map(c => `<td class="${c.n ? "n" : ""} ${c.cl || ""}">${c.f ? c.f(l, i) : c.k === "epc" ? epcHtml(l.epc) : esc(l[c.k])}</td>`).join("") + "</tr>").join("");
   return `<div class="tabela" style="${opts.alt ? "max-height:" + opts.alt : ""}"><table><thead><tr>${cab}</tr></thead><tbody>${corpo}</tbody></table></div>`;
 }
 // Lista com caixas de seleção: uma por linha + "selecionar todos" no cabeçalho, contador e ações em lote.

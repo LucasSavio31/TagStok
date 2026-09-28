@@ -13,6 +13,8 @@ from dataclasses import dataclass
 
 HEADER_SGTIN96 = 0x30
 HEADER_GID96 = 0x35
+# Etiqueta NFC (NTAG213/215/216...): o app do coletor entrega "4E4643" ("NFC" em ASCII) + UID completado com 0
+PREFIXO_NFC = "4E4643"
 SERIAL_MAX_SGTIN = (1 << 38) - 1
 SERIAL_MAX_GID = (1 << 36) - 1
 
@@ -91,7 +93,7 @@ def gid96(gerente: int, classe: int, serial: int) -> str:
 
 @dataclass
 class EpcDecodificado:
-    esquema: str                 # SGTIN-96 | GID-96 | OUTRO
+    esquema: str                 # SGTIN-96 | GID-96 | NFC | OUTRO
     epc: str
     gtin: str | None = None
     serial: int | None = None
@@ -100,6 +102,7 @@ class EpcDecodificado:
     gerente: int | None = None
     classe: int | None = None
     uri: str | None = None
+    uid: str | None = None       # NFC: UID do chip
 
     def dict(self) -> dict:
         return {k: v for k, v in self.__dict__.items() if v is not None}
@@ -117,6 +120,10 @@ def eh_epc(texto: str) -> bool:
 def decodificar(epc: str) -> EpcDecodificado:
     """Lê o que está dentro do EPC (GTIN e série para SGTIN-96; gerente/classe para GID-96)."""
     h = normalizar(epc)
+    if h.startswith(PREFIXO_NFC) and eh_epc(h):
+        uid = h[len(PREFIXO_NFC):].lstrip("0")
+        uid = ("0" + uid) if len(uid) % 2 else uid
+        return EpcDecodificado("NFC", h, uid=uid, uri=f"nfc:uid:{uid}")
     if len(h) != 24 or not eh_epc(h):
         return EpcDecodificado("OUTRO", h)
     valor = int(h, 16)

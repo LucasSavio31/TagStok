@@ -187,6 +187,21 @@ class MainActivity : Activity() {
         conectarRfid()
     }
 
+    /** NFC (NTAG213/215/216...): ligado enquanto o app está na frente. A leitura vai para a tela como uma etiqueta. */
+    override fun onResume() {
+        super.onResume()
+        val situacao = Nfc.ligar(this) { id, detalhes ->
+            chamarTela("detalheNfc", detalhes)
+            chamarTela("leituraRfid", id)
+        }
+        if (situacao.isNotEmpty()) Log.i(TAG, "NFC: $situacao")
+    }
+
+    override fun onPause() {
+        Nfc.desligar(this)
+        super.onPause()
+    }
+
     private fun conectarRfid() {
         // Android 12+: o SDK da Zebra precisa da permissão de Bluetooth (igual ao app de exemplo da Zebra)
         if (Build.VERSION.SDK_INT >= 31 &&
