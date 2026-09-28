@@ -531,6 +531,14 @@ telas.menu = {
       }).join("");
   },
   conectar() { try { app?.recarregarServidor?.(); } catch {} },
+  // No menu nenhuma operação é feita: só mostra o que foi lido e onde usar
+  rfid(epc) {
+    const i = nfcInfo.get(epc) || {};
+    msg(ehNfc(epc) ? `Etiqueta NFC lida: UID ${uidNfc(epc)}${i.modelo ? " (" + i.modelo + ")" : ""}
+Abra uma tela para usar: Vincular, Entrada, Baixa, Consulta, Ler etiqueta...`
+                   : `Etiqueta RFID lida: ${epc}
+Abra uma tela para usar.`, "info");
+  },
 };
 
 // ======================================================================= FINALIZAR OF (conferência da produção)

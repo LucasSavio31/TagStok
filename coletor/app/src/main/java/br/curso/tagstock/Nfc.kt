@@ -3,6 +3,7 @@ package br.curso.tagstock
 import android.app.Activity
 import android.nfc.NfcAdapter
 import android.nfc.Tag
+import android.nfc.tech.MifareClassic
 import android.nfc.tech.MifareUltralight
 import android.nfc.tech.NfcA
 import android.os.Bundle
@@ -10,7 +11,8 @@ import android.util.Log
 import org.json.JSONObject
 
 /**
- * Etiquetas NFC (13,56 MHz): NTAG213/215/216 e outras, lidas pela antena NFC do Android.
+ * Etiquetas NFC (13,56 MHz): NTAG213/215/216, MIFARE Classic e outras, lidas pela antena NFC do Android
+ * (nas costas do coletor, no centro, embaixo do adesivo de regulamentação; até 2 cm).
  * (O leitor RFID do gatilho é UHF, 860–960 MHz, e não enxerga NFC.)
  *
  * Com o app na frente, o NFC fica ligado o tempo todo: basta encostar a etiqueta no coletor
@@ -32,8 +34,16 @@ object Nfc {
         return PREFIXO + hex.padStart(tamanho, '0')
     }
 
-    /** Modelo do chip: NTAG213/215/216 pelo GET_VERSION (NXP); senão, pelo tipo do Android. */
+    /** Modelo do chip: NTAG213/215/216 pelo GET_VERSION (NXP); MIFARE Classic pelo tamanho; senão, pelo tipo do Android. */
     fun modelo(tag: Tag): String {
+        try {
+            MifareClassic.get(tag)?.let { c ->
+                val tipo = when (c.type) { MifareClassic.TYPE_PLUS -> "MIFARE Plus"; MifareClassic.TYPE_PRO -> "MIFARE Pro"; else -> "MIFARE Classic" }
+                val tamanho = when (c.size) { MifareClassic.SIZE_MINI -> "Mini"; MifareClassic.SIZE_1K -> "1K"; MifareClassic.SIZE_2K -> "2K"; MifareClassic.SIZE_4K -> "4K"; else -> "" }
+                return "$tipo $tamanho (${c.size} bytes)".replace("  ", " ")
+            }
+        } catch (e: Throwable) {
+        }
         try {
             NfcA.get(tag)?.use { a ->
                 a.connect()
@@ -83,7 +93,7 @@ object Nfc {
                 Log.w(TAG, "NFC: erro na leitura (${e.message})")
             }
         }, NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B or NfcAdapter.FLAG_READER_NFC_F or
-            NfcAdapter.FLAG_READER_NFC_V or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK or NfcAdapter.FLAG_READER_NO_PLATFORM_SOUNDS,
+            NfcAdapter.FLAG_READER_NFC_V or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,   // o Android bipa ao encostar a etiqueta
             opcoes)
         return ""
     }
