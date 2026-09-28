@@ -652,17 +652,51 @@ PAGINAS.monitor = {
 PAGINAS.produtos = {
   titulo: "Produtos",
   async abrir(el) {
+    const adm = usuario.perfil === "ADMIN";
     el.innerHTML = `<div class="card"><div class="filtros"><label>Buscar<input id="pQ" placeholder="SKU, descrição, GTIN, cor"></label>
+        ${adm ? '<button class="perigo" id="btExcluir" disabled>🗑 Excluir selecionados</button><span class="fraco" id="nSel"></span>' : ""}
         <span style="flex:1"></span><button id="btImp">⬆ Importar CSV</button><button onclick="baixar('/api/produtos.csv')">⬇ Exportar CSV</button>
         <button class="p" id="btNovo">+ Novo produto</button></div><div id="lista"></div></div>`;
+    const marcados = new Set();
+    let lista = [];
+    const contar = () => {
+      if (!adm) return;
+      $("#btExcluir").disabled = !marcados.size;
+      $("#nSel").textContent = marcados.size ? `${marcados.size} selecionado(s)` : "";
+      const todos = $("#pTodos");
+      if (todos) { const n = lista.filter(p => marcados.has(p.id)).length; todos.checked = n > 0 && n === lista.length; todos.indeterminate = n > 0 && n < lista.length; }
+    };
     const carregar = async () => {
-      const lista = await get("/api/produtos?q=" + encodeURIComponent($("#pQ").value));
-      $("#lista").innerHTML = tabela([{t: "SKU", f: p => `<b>${esc(p.sku)}</b>`}, {t: "Descrição", k: "descricao"}, {t: "Cor", k: "cor"}, {t: "Tam.", k: "tamanho"},
+      lista = await get("/api/produtos?q=" + encodeURIComponent($("#pQ").value));
+      const ids = new Set(lista.map(p => p.id));
+      [...marcados].forEach(id => { if (!ids.has(id)) marcados.delete(id); });
+      $("#lista").innerHTML = tabela([
+        ...(adm ? [{t: '<input type="checkbox" id="pTodos" title="Selecionar todos">', f: p => `<input type="checkbox" class="pSel" value="${p.id}" ${marcados.has(p.id) ? "checked" : ""}>`}] : []),
+        {t: "SKU", f: p => `<b>${esc(p.sku)}</b>`}, {t: "Descrição", k: "descricao"}, {t: "Cor", k: "cor"}, {t: "Tam.", k: "tamanho"},
         {t: "Grupo", f: p => esc([p.grupo, p.subgrupo].filter(Boolean).join(" / "))}, {t: "GTIN / EAN", k: "gtin", cl: "mono"},
         {t: "Preço", n: 1, f: p => p.preco ? moeda(p.preco) : ""}, {t: "Mín.", k: "estoque_min", n: 1}, {t: "Saldo", k: "saldo", n: 1},
         {t: "", f: p => p.ativo ? "" : '<span class="selo">inativo</span>'}], lista, {clic: 1, alt: "70vh", vazio: "Nenhum produto cadastrado"});
       ligarLinhas($("#lista"), lista, p => editarProduto(p, carregar));
+      if (adm) {
+        $$(".pSel").forEach(c => c.onchange = () => { c.checked ? marcados.add(+c.value) : marcados.delete(+c.value); contar(); });
+        $("#pTodos")?.addEventListener("change", e => {
+          lista.forEach(p => e.target.checked ? marcados.add(p.id) : marcados.delete(p.id));
+          $$(".pSel").forEach(c => c.checked = e.target.checked); contar();
+        });
+      }
+      contar();
     };
+    if (adm) $("#btExcluir").onclick = () => tentar(async () => {
+      const sel = lista.filter(p => marcados.has(p.id));
+      if (!sel.length) return;
+      const nomes = sel.slice(0, 8).map(p => p.sku).join(", ") + (sel.length > 8 ? ` e mais ${sel.length - 8}` : "");
+      if (!confirm(`Excluir ${sel.length} produto(s)?\n${nomes}\n\nProduto que já tem etiquetas não é excluído (desative em vez disso).`)) return;
+      const r = await post("/api/produtos/excluir", {ids: sel.map(p => p.id)});
+      marcados.clear();
+      avisar(`${r.excluidos} produto(s) excluído(s)` + (r.mantidos.length ? `\n${r.mantidos.length} mantido(s) porque já têm etiquetas: ${r.mantidos.slice(0, 5).join(", ")}${r.mantidos.length > 5 ? "…" : ""}` : ""),
+             r.mantidos.length ? "info" : "ok", r.mantidos.length ? 9000 : 3800);
+      await carregar();
+    });
     let t; $("#pQ").oninput = () => { clearTimeout(t); t = setTimeout(() => tentar(carregar), 300); };
     $("#btNovo").onclick = () => editarProduto(null, carregar);
     $("#btImp").onclick = () => abrirDlg("Importar produtos (CSV)", `<div class="dica">Primeira linha com os nomes das colunas (separador <b>;</b>):<br>

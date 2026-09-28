@@ -371,6 +371,27 @@ def excluir_produto(pid: int, con: Con = Depends(conexao), _u=Depends(admin)):
     return {"ok": True}
 
 
+class Ids(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=20000)
+
+
+@app.post("/api/produtos/excluir")
+def excluir_produtos(d: Ids, con: Con = Depends(conexao), _u=Depends(admin)):
+    """Exclui vários produtos. Produto que já tem etiquetas não é excluído (o histórico depende dele)."""
+    excluidos, mantidos = 0, []
+    for pid in dict.fromkeys(d.ids):
+        p = con.execute("SELECT sku FROM produtos WHERE id=?", (pid,)).fetchone()
+        if not p:
+            continue
+        if con.execute("SELECT 1 FROM etiquetas WHERE produto_id=?", (pid,)).fetchone():
+            mantidos.append(p["sku"])
+            continue
+        con.execute("DELETE FROM pedido_itens WHERE produto_id=?", (pid,))
+        con.execute("DELETE FROM produtos WHERE id=?", (pid,))
+        excluidos += 1
+    return {"excluidos": excluidos, "mantidos": mantidos}
+
+
 class Importacao(BaseModel):
     csv: str
 

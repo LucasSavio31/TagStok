@@ -220,6 +220,14 @@ def test_importar_produtos_e_painel(c):
     assert painel["produtos"] == 2 and len(painel["por_local"]) == 2
 
 
+def test_excluir_produtos_em_lote(c):
+    a, b, com_tag = produto(c, "DEL-A"), produto(c, "DEL-B"), produto(c, "DEL-C")
+    ok(c.post("/api/etiquetas/vincular", json={"epcs": ["E28011700000020D00000001"], "produto_id": com_tag}))
+    r = ok(c.post("/api/produtos/excluir", json={"ids": [a, b, com_tag]}))
+    assert r == {"excluidos": 2, "mantidos": ["DEL-C"]}
+    assert [p["sku"] for p in ok(c.get("/api/produtos"))] == ["DEL-C"]
+
+
 def test_estacao_remota(c):
     ok(c.post("/api/remoto/comando", json={"acao": "limpar"}))
     ok(c.post("/api/remoto/comando", json={"acao": "ler", "potencia": 50}))
